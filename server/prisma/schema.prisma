@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id           String   @id // UUID
+  code         String   @unique // Short code for URL/Entry
+  
+  hostUserId   String
+  
+  // Minimal metadata (optional: for connection management)
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  // Relations
+  games        Game[]
+}
+
+model Game {
+  id        String   @id @default(uuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  // The Single Source of Truth for Board/Deck/Players/Phase
+  // Includes: rules, roles, decks, phase, playerStates
+  stateJson String   @default("{}") 
+
+  // Relations
+  events    Event[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  gameId      String
+  game        Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  seq         Float      // Sequence number (timestamp)
+  type        String   // e.g. "play_card", "phase_change"
+  payloadJson String   // Details
+  
+
+  createdAt   DateTime @default(now())
+}
+
+model GameTemplate {
+  id        String   @id @default(cuid())
+  title     String
+  mode      String   // "table" | "oldmaid"
+  type      String   @default("turn_based") // "turn_based" | "free_talk" | "round_score"
+  ruleConfig String  @default("{}") // JSON string of rule configuration
+  ruleCardsJson String @default("[]") // JSON string of generated rule cards
+  rulesText String?  // Optional text (Legacy/Custom)
+  deckJson  String   // JSON string of deck configuration
+  revision  Int      @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

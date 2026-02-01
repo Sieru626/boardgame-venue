@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoardGame Venue (Emergency Recovery)</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: #eee; margin: 0; padding: 20px; }
+        #app { max-width: 800px; margin: 0 auto; }
+        .card { border: 1px solid #444; background: #333; padding: 10px; margin: 5px; display: inline-block; width: 60px; height: 90px; text-align: center; vertical-align: top; border-radius: 4px; }
+        .log-area { height: 300px; overflow-y: scroll; background: #111; border: 1px solid #333; padding: 10px; margin-bottom: 10px; font-family: monospace; }
+        .controls { margin-bottom: 20px; padding: 10px; background: #222; border-bottom: 1px solid #444; }
+        input, button { padding: 8px; margin: 2px; }
+        button { cursor: pointer; background: #4a6fa5; border: none; color: white; border-radius: 4px; }
+        button:hover { background: #5a7fb5; }
+        .status { color: #888; font-size: 0.8em; margin-bottom: 10px; }
+        #login-screen { text-align: center; margin-top: 100px; }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <h1>BoardGame Venue</h1>
+        <p>Emergency Recovery Mode</p>
+        <input type="text" id="nickname" placeholder="Nickname">
+        <button onclick="joinGame()">Enter Room</button>
+    </div>
+
+    <div id="app" style="display:none;">
+        <div class="status">
+             Status: <span id="status">Connecting...</span> | Room: <span id="room-id"></span> | Name: <span id="my-name"></span>
+        </div>
+        
+        <div class="controls">
+            <button onclick="drawCard()">Draw Card</button>
+            <button onclick="rollDice()">Roll Dice</button>
+            <button onclick="resetGame()" style="background:#a54a4a;">Reset Game</button>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <div style="flex: 2;">
+                <div>Table</div>
+                <div id="table-area" style="min-height: 200px; background: #2a2a2a; padding: 10px; border-radius: 8px; position:relative;">
+                    <!-- Cards go here -->
+                </div>
+                <div style="margin-top:10px;">My Hand</div>
+                <div id="hand-area" style="min-height: 120px; background: #252525; padding: 10px; border-radius: 8px;"></div>
+            </div>
+            
+            <div style="flex: 1;">
+                <div>Chat / Log</div>
+                <div id="log" class="log-area"></div>
+                <form onsubmit="sendChat(event)">
+                    <input type="text" id="chat-msg" style="width: 70%;" placeholder="Message...">
+                    <button type="submit">Send</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let myId = localStorage.getItem('userId') || Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('userId', myId);
+        
+        // Simple Audio Context check (to prevent some heavy browser overload if any audio was present, though none here)
+
+        function joinGame() {
+            const name = document.getElementById('nickname').value || 'Player' + Math.floor(Math.random()*100);
+            document.getElementById('my-name').innerText = name;
+            
+            // Connect to SAME origin (Serving from 3010)
+            socket = io(); 
+
+            socket.on('connect', () => {
+                document.getElementById('status').innerText = 'Connected';
+                // Auto-join a default 'Lobby' for recovery
+                socket.emit('join_room', { roomId: 'LOBBY', nickname: name, userId: myId }, (res) => {
+                    if (res.error) alert(res.error);
+                    else {
+                        document.getElementById('login-screen').style.display = 'none';
+                        document.getElementById('app').style.display = 'block';
+                        document.getElementById('room-id').innerText = res.roomCode || 'LOBBY';
+                        renderState(res.state || res);
+                    }
+                });
+            });
+
+            socket.on('state_update', (state) => {
+                renderState(state);
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('status').innerText = 'Disconnected';
+            });
+        }
+
+        function renderState(state) {
+            // Chat
+            const log = document.getElementById('log');
+            log.innerHTML = '';
+            (state.chat || []).forEach(msg => {
+                const d = document.createElement('div');
+                d.textContent = `[${msg.sender}] ${msg.message}`;
+                d.style.color = msg.sender === 'System' ? '#888' : '#fff';
+                d.style.borderBottom = '1px solid #222';
+                d.style.padding = '2px';
+                log.appendChild(d);
+            });
+            log.scrollTop = log.scrollHeight;
+
+            // Hand
+            const myPlayer = state.players.find(p => p.id === myId);
+            const handDiv = document.getElementById('hand-area');
+            handDiv.innerHTML = '';
+            if (myPlayer) {
+                myPlayer.hand.forEach((card, i) => {
+                    const el = document.createElement('div');
+                    el.className = 'card';
+                    el.textContent = card.name || '?';
+                    el.onclick = () => playCard(i);
+                    handDiv.appendChild(el);
+                });
+            }
+
+            // Table
+            const tableDiv = document.getElementById('table-area');
+            tableDiv.innerHTML = '';
+            (state.table || []).forEach(obj => {
+                const el = document.createElement('div');
+                el.className = 'card';
+                el.textContent = (obj.card && obj.card.name) || '?';
+                el.style.position = 'absolute';
+                el.style.left = (50 + (obj.x || 0)) + '%'; // Simplified
+                el.style.top = (50 + (obj.y || 0)) + 'px';
+                el.title = `Played by ${obj.ownerName}`;
+                tableDiv.appendChild(el);
+            });
+        }
+
+        function sendChat(e) {
+            e.preventDefault();
+            const msg = document.getElementById('chat-msg').value;
+            if (!msg) return;
+            socket.emit('game_action', { roomId: 'LOBBY', type: 'chat', payload: { message: msg }, userId: myId }, () => {}); // Ack
+            document.getElementById('chat-msg').value = '';
+        }
+        
+        function drawCard() {
+             socket.emit('game_action', { roomId: 'LOBBY', type: 'draw_card', payload: {}, userId: myId }, () => {});
+        }
+
+        function playCard(index) {
+             socket.emit('game_action', { roomId: 'LOBBY', type: 'play_card', payload: { index }, userId: myId }, () => {});
+        }
+
+        function rollDice() {
+             socket.emit('game_action', { roomId: 'LOBBY', type: 'roll_dice', payload: { sides: 6 }, userId: myId }, () => {});
+        }
+
+        function resetGame() {
+            if(confirm("Reset Game?")) {
+                socket.emit('host_action', { roomId: 'LOBBY', type: 'reset_game', payload: {}, userId: myId }, () => {});
+            }
+        }
+    </script>
+</body>
+</html>
