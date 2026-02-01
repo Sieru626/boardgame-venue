@@ -11,7 +11,7 @@ const next = require('next');
 // --- Recovery Mode: AI Re-enabled via HTTP ---
 const { GoogleGenAI } = require('@google/genai');
 
-const PORT = process.env.PORT || 3010;
+const PORT = process.env.PORT || 3000;
 const dev = process.env.NODE_ENV !== 'production';
 const nextApp = next({ dev, dir: path.join(__dirname, '../client') });
 const handle = nextApp.getRequestHandler();
