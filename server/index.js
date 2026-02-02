@@ -1,4 +1,15 @@
 require('dotenv').config();
+
+console.log('--- SERVER STARTUP ENV CHECK ---');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('DATABASE_URL exists:', !!process.env.DATABASE_URL);
+if (process.env.DATABASE_URL) {
+    // Log masked URL for safety (show schema and start of path)
+    console.log('DATABASE_URL value (masked):', process.env.DATABASE_URL.replace(/:[^:@]*@/, ':****@'));
+} else {
+    console.error('CRITICAL: DATABASE_URL is missing!');
+}
+console.log('--------------------------------');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
