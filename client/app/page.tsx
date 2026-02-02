@@ -28,7 +28,9 @@ function HomeContent() {
     // Connect to backend
     // Connect to backend (Relative in production)
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-    const socketInstance = socketUrl ? io(socketUrl) : io();
+    const socketInstance = socketUrl
+      ? io(socketUrl, { transports: ["websocket", "polling"], withCredentials: true })
+      : io({ transports: ["websocket", "polling"], withCredentials: true });
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
@@ -63,7 +65,8 @@ function HomeContent() {
         if (res.ok && res.data.roomId) {
           router.push(`/room/${res.data.roomId}`);
         } else {
-          alert("作成に失敗しました: " + (res.error || '不明なエラー'));
+          // res.error contains the detailed message from server (or "Unknown error")
+          alert("作成に失敗しました:\n" + (res.error || '不明なエラー'));
         }
       });
     }

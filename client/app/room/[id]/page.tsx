@@ -50,7 +50,9 @@ export default function RoomPage() {
 
         // Connect to relative path in production, or specific URL in dev if set
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-        const socketInstance = socketUrl ? io(socketUrl) : io();
+        const socketInstance = socketUrl
+            ? io(socketUrl, { transports: ["websocket", "polling"], withCredentials: true })
+            : io({ transports: ["websocket", "polling"], withCredentials: true });
         setSocket(socketInstance);
 
         socketInstance.on('connect', () => {

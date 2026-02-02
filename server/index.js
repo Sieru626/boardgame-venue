@@ -19,20 +19,33 @@ const handle = nextApp.getRequestHandler();
 const prisma = new PrismaClient();
 const app = express();
 const server = http.createServer(app);
+
+// CORS Configuration
+const clientUrls = process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : [];
+const allowedOrigins = dev ? ["http://localhost:3000"] : (clientUrls.length > 0 ? clientUrls : "*");
+
 const io = new Server(server, {
     cors: {
-        origin: dev ? "http://localhost:3000" : undefined,
+        origin: allowedOrigins,
         methods: ["GET", "POST"],
         credentials: true
     }
 });
 
 app.use(cors({
-    origin: dev ? "http://localhost:3000" : undefined,
+    origin: allowedOrigins,
     credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
-// app.use(express.static('public')); // Next.js handles static files usually, but keeping 'public' for legacy assets is fine if needed.
+// app.use(express.static('public')); 
+
+// Connection Logging
+io.on('connection', (socket) => {
+    console.log(`[socket] connected: ${socket.id}, origin: ${socket.handshake.headers.origin}`);
+    socket.on('disconnect', (reason) => {
+        console.log(`[socket] disconnected: ${socket.id}, reason: ${reason}`);
+    });
+});
 
 
 // expressApp.use(express.static('public')); // Disable old static Serve, let Next handle it or separate logic? 
@@ -702,25 +715,40 @@ io.on('connection', (socket) => {
         return newHand;
     };
 
+    // Connection Logging
+    socket.onAny((event, ...args) => {
+        console.log(`[socket] ${event} from ${socket.id}`, args);
+    });
+
     // 1. Create Room
     socket.on('create_room', async ({ nickname, userId }, callback) => {
+        console.log(`[create_room] Request from ${nickname} (${userId})`);
         try {
             const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            // Generate IDs explicitly
+            const roomId = crypto.randomUUID();
+
             const room = await prisma.room.create({
-                data: { id: crypto.randomUUID(), code, hostUserId: userId }
+                data: { id: roomId, code, hostUserId: userId }
             });
+            console.log(`[create_room] DB Room created: ${code}`);
+
             const initialState = createInitialState(userId, nickname);
             const game = await prisma.game.create({
                 data: { roomId: room.id, stateJson: JSON.stringify(initialState) }
             });
+            console.log(`[create_room] DB Game initialized for: ${code}`);
+
             // Important: Set socket data
             socket.data.userId = userId;
             socket.join(room.code);
 
+            console.log(`[create_room] Success: ${code}`);
             sendAck(callback, true, { roomId: room.code, gameId: game.id });
         } catch (e) {
-            console.error(e);
-            sendAck(callback, false, 'Creation failed');
+            console.error(`[create_room] Failed:`, e);
+            sendAck(callback, false, `Creation failed: ${e.message}`);
         }
     });
 
