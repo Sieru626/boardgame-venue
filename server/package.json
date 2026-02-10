@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "description": "Backend for Board Game Venue MVP",
   "main": "index.js",
-  "scripts": {
-  "start": "node index.js",
-  "dev": "nodemon index.js",
-  "db:push": "prisma db push --schema prisma/schema.prisma",
-  "start:render": "npm run db:push && node index.js"
-},
+    "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "db:push": "npx prisma db push",
+    "start:render": "npx prisma db push --accept-data-loss && node index.js"
+  },
 
 "dependencies": {
   "@google/genai": "^1.37.0",
