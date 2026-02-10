@@ -2,7 +2,7 @@ services:
   - type: web
     name: boardgame-venue
     env: node
-   rootDir: server
+    rootDir: server
     buildCommand: npm install && npx prisma generate
     startCommand: npm run start:render
     plan: free
