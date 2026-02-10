@@ -24,7 +24,7 @@ const { GoogleGenAI } = require('@google/genai');
 
 const PORT = process.env.PORT || 3000;
 const dev = process.env.NODE_ENV !== 'production';
-const nextApp = next({ dev, dir: path.join(__dirname, '../client') });
+const nextApp = next({ dev, dir: dev ? path.join(__dirname, '../client') : __dirname });
 const handle = nextApp.getRequestHandler();
 
 const prisma = new PrismaClient();
