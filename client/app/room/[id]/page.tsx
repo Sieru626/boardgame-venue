@@ -32,8 +32,6 @@ export default function RoomPage() {
     const [msg, setMsg] = useState('');
     const [showLibrary, setShowLibrary] = useState(false);
     const [showPostGameEditor, setShowPostGameEditor] = useState(false);
-    const [showLibrary, setShowLibrary] = useState(false);
-    const [showPostGameEditor, setShowPostGameEditor] = useState(false);
     const [activeTab, setActiveTab] = useState<'board' | 'log' | 'status'>('board');
 
     // Layout Refs
