@@ -864,8 +864,30 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                     <Card
                                         key={card.id || idx}
                                         card={card}
-                                        onClick={() => isMyTurn ? playCard(idx) : alert('あなたのターンではありません')}
-                                        className={`${isMyTurn ? 'ring-2 ring-blue-400 hover:ring-4' : 'opacity-80'}`}
+                                        onClick={() => {
+                                            if (!isMyTurn) return alert('あなたのターンではありません');
+
+                                            // STRICT RULE: MixJuice & OldMaid cannot play to table
+                                            if (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') {
+                                                if (mjActionPending === 'change') {
+                                                    // Only allow click if we are in "Change" mode
+                                                    socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: idx });
+                                                    setMjActionPending('none');
+                                                }
+                                                return;
+                                            }
+                                            if (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') {
+                                                // Own hand is completely non-interactive in Old Maid
+                                                return;
+                                            }
+
+                                            playCard(idx);
+                                        }}
+                                        className={`${(state.selectedMode === 'mixjuice' && mjActionPending === 'change') ? 'ring-4 ring-yellow-400 cursor-pointer animate-pulse' :
+                                                (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') ? 'cursor-default opacity-100' :
+                                                    (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') ? 'cursor-default opacity-100' :
+                                                        isMyTurn ? 'ring-2 ring-blue-400 hover:ring-4 cursor-pointer' : 'opacity-80'
+                                            }`}
                                     />
                                 ))}
                             </AnimatePresence>

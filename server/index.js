@@ -24,8 +24,9 @@ const { GoogleGenAI } = require('@google/genai');
 
 const PORT = process.env.PORT || 3000;
 const dev = process.env.NODE_ENV !== 'production';
-const nextApp = next({ dev, dir: dev ? path.join(__dirname, '../client') : __dirname });
-const handle = nextApp.getRequestHandler();
+const skipNext = process.env.SKIP_NEXT === 'true';
+const nextApp = !skipNext ? next({ dev, dir: dev ? path.join(__dirname, '../client') : __dirname }) : null;
+const handle = !skipNext ? nextApp.getRequestHandler() : (req, res) => res.status(404).send('Next.js Skipped');
 
 const prisma = new PrismaClient();
 const app = express();
@@ -911,6 +912,11 @@ io.on('connection', (socket) => {
                 }
             }
             else if (type === 'play_card') {
+                // Strict Rule: Disable table-play for Mix Juice & Old Maid
+                if (state.phase === 'mixjuice' || state.phase === 'oldmaid') {
+                    return sendAck(callback, false, 'このゲームモードでは場にカードを出せません');
+                }
+
                 // Collision Check (Optimistic Locking)
                 if (payload.version !== undefined && state.version !== undefined && payload.version !== state.version) {
                     return sendAck(callback, false, 'Simultaneous action detected (Version Mismatch). Please try again.');
@@ -1013,7 +1019,7 @@ io.on('connection', (socket) => {
                 }
             }
             else if (type === 'start_game') {
-                const mode = state.selectedMode || 'tabletop';
+                const mode = state.selectedMode || (state.activeTemplate ? state.activeTemplate.mode : 'tabletop');
 
                 if (mode === 'oldmaid') {
                     // === Old Maid Start Logic (Deal & Auto-Start) ===
@@ -1309,8 +1315,34 @@ io.on('connection', (socket) => {
 
             const mj = state.mixjuice;
             const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
-            const turnPlayerId = mj.turnSeat[mj.turnIndex];
+            // --- Strict Turn & Seat Synchronization ---
+            // 1. Rebuild turnSeat to match currently active (online/non-spectator) players
+            const currentActiveIds = activePlayers.map(p => p.id);
+            // Check if turnSeat is stale (length mismatch or missing IDs)
+            let seatStale = false;
+            if (mj.turnSeat.length !== currentActiveIds.length) seatStale = true;
+            else {
+                for (const pid of mj.turnSeat) {
+                    if (!currentActiveIds.includes(pid)) { seatStale = true; break; }
+                }
+            }
 
+            if (seatStale) {
+                console.warn(`[MixJuice] Seat mismatch detected. Rebuilding turnSeat. Old: ${mj.turnSeat.length}, New: ${currentActiveIds.length}`);
+                // Simple rebuild: just take active players in order.
+                // ideally preserving order, but for MVP recovery, just resetting is safer.
+                mj.turnSeat = currentActiveIds;
+                mj.turnIndex = 0; // Reset turn to first player to avoid OOB
+                state.chat.push({ sender: 'System', message: 'プレイヤー人数変更によりターン順がリセットされました', timestamp: Date.now() });
+            }
+
+            // 2. Bounds Check (Redundant but safe)
+            if (mj.turnIndex >= mj.turnSeat.length) {
+                console.warn(`[MixJuice] Fixed OOB turnIndex: ${mj.turnIndex} -> 0`);
+                mj.turnIndex = 0;
+            }
+
+            const turnPlayerId = mj.turnSeat[mj.turnIndex];
             if (userId !== turnPlayerId) return sendAck(callback, false, '手番ではありません');
 
             const player = state.players.find(p => p.id === userId);
@@ -1320,10 +1352,17 @@ io.on('connection', (socket) => {
                 state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
             }
             else if (type === 'change') {
-                if (typeof targetIndex !== 'number' || !player.hand[targetIndex]) return sendAck(callback, false, 'Invalid Card');
+                // Fallback: If targetIndex is invalid but hand has cards, default to 0
+                let actualIndex = targetIndex;
+                if ((typeof actualIndex !== 'number' || !player.hand[actualIndex]) && player.hand.length > 0) {
+                    // console.log(`[MixJuice] Invalid targetIndex ${targetIndex}, defaulting to 0`);
+                    actualIndex = 0;
+                }
+
+                if (typeof actualIndex !== 'number' || !player.hand[actualIndex]) return sendAck(callback, false, 'Card not found or hand empty');
                 if (mj.deck.length === 0) return sendAck(callback, false, '山札がありません');
 
-                const discarded = player.hand.splice(targetIndex, 1)[0];
+                const discarded = player.hand.splice(actualIndex, 1)[0];
                 mj.discard.push(discarded);
                 player.hand.push(mj.deck.pop());
                 state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
@@ -1827,41 +1866,25 @@ io.on('connection', (socket) => {
                 timestamp: Date.now()
             });
 
-            // Remove Pairs for Current Player
-            const oldLen = currentPlayer.hand.length;
+            // Pair Removal & Logging
+            // Logic: capture snapshot of hand before removal to identify what left.
+            const oldHand = [...currentPlayer.hand];
 
-            // Helper to identify the pair rank for logging
-            // We need to know what was removed. removePairs doesn't return that detail easily without refactor.
-            // Custom remove logic for logging:
-            const rankMap = {};
-            currentPlayer.hand.forEach(c => {
-                const r = c.name === 'Joker' ? 'Joker' : c.name.split('-')[1];
-                if (!rankMap[r]) rankMap[r] = 0;
-                rankMap[r]++;
-            });
-            const discardRanks = [];
-            // This logic allows predicting what removePairs will do, OR we can modify removePairs. 
-            // Since removePairs is a pure helper, let's keep it simple and just compare hands or trust removePairs.
-            // Let's modify the log AFTER removePairs by finding which rank disappeared.
-            // Actually, simplest is just to log "a pair" for now, or minimal info.
-            // User request: "A discarded a pair of 7". 
-            // Let's inspect the `removePairs` implementation or just implement inline detection.
-            // Inline detection logic:
-            // The drawn card `drawnCard` likely caused the pair if one was made.
-            // So check if currentPlayer had a matching rank.
-            const drawnRank = drawnCard.name === 'Joker' ? 'Joker' : drawnCard.name.split('-')[1];
-            const hasMatch = currentPlayer.hand.some(c => {
-                const r = c.name === 'Joker' ? 'Joker' : c.name.split('-')[1];
-                return c !== drawnCard && r === drawnRank && r !== 'Joker'; // Joker doesn't pair usually in basic Old Maid? Or does it? Usually Joker is alone.
-                // Wait, standard Old Maid: Joker matches nothing.
-            });
-
-            // Now actually remove pairs
+            // Execute Removal
             currentPlayer.hand = removePairs(currentPlayer.hand, state.oldMaid.discardPile);
 
-            if (currentPlayer.hand.length < oldLen) {
-                // A pair was indeed removed. It was likely the drawn rank.
-                state.chat.push({ sender: 'System', message: `${currentPlayer.name} が ${drawnRank} のペアを捨てました！`, timestamp: Date.now() });
+            // Diff to find what was removed
+            if (currentPlayer.hand.length < oldHand.length) {
+                // Find items in oldHand that are NOT in currentPlayer.hand (by checking IDs or just counting)
+                // Since removePairs removes 2 cards, and we added 1 (drawnCard), net change is -1 check? 
+                // Wait, oldLen was calculated AFTER draw.
+                // drawnCard was pushed at line 1840.
+
+                // Identify the rank of the pair formed.
+                // It MOST LIKELY involves the drawn card.
+                const drawnRank = drawnCard.name === 'Joker' ? 'Joker' : drawnCard.name.split('-')[1];
+
+                state.chat.push({ sender: 'System', message: `${currentPlayer.name} が ${drawnRank} のペアを揃えて捨てました！`, timestamp: Date.now() });
             }
 
             // Check Outs
@@ -2336,11 +2359,19 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => { });
 });
 
-nextApp.prepare().then(() => {
-    // Next.js Catch-All
-    app.all('*', (req, res) => handle(req, res));
+if (!skipNext && nextApp) {
+    nextApp.prepare().then(() => {
+        // Next.js Catch-All
+        app.all('*', (req, res) => handle(req, res));
 
-    server.listen(PORT, () => {
-        console.log(`Recovery Server running on port ${PORT}`);
+        server.listen(PORT, () => {
+            console.log(`Recovery Server running on port ${PORT}`);
+        });
     });
-});
+} else {
+    // Standalone API Mode
+    app.get('/', (req, res) => res.send('BoardGame Venue API Server (Next.js Skipped)'));
+    server.listen(PORT, () => {
+        console.log(`API Server running on port ${PORT} (Next.js Skipped)`);
+    });
+}
