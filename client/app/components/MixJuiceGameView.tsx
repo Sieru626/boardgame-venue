@@ -251,6 +251,8 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                 </div>
             )}
 
+            <div className="absolute top-0 right-0 p-1 text-[10px] text-gray-500 opacity-50 pointer-events-none z-[100000]">v6.1 DEBUG</div>
+
             <style jsx>{`
                 @keyframes shrink { from { width: 100%; } to { width: 0%; } }
             `}</style>

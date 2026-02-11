@@ -1320,9 +1320,15 @@ io.on('connection', (socket) => {
             const activeIds = activePlayers.map(p => p.id);
 
             // turnSeatにいない人が混ざっていたら再構築
-            const isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
+            let isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
+
+            // Critical Fix: If the ACting user is not in the seat, force repair immediately
+            if (!mj.turnSeat.includes(userId) && activeIds.includes(userId)) {
+                isSeatInvalid = true;
+            }
+
             if (isSeatInvalid) {
-                console.log("[MixJuice] Repairing turnSeat...");
+                console.log("[MixJuice] Repairing turnSeat...", { old: mj.turnSeat, new: activeIds });
                 mj.turnSeat = activeIds;
                 mj.turnIndex = 0; // 安全のためリセット
             }
@@ -1332,7 +1338,9 @@ io.on('connection', (socket) => {
             // -------------------------------------------------------
 
             const turnPlayerId = mj.turnSeat[mj.turnIndex];
-            if (userId !== turnPlayerId) return sendAck(callback, false, 'あなたの番ではありません');
+            if (userId !== turnPlayerId) {
+                return sendAck(callback, false, `あなたの番ではありません (T:${turnPlayerId?.slice(0, 4)} Y:${userId?.slice(0, 4)} I:${mj.turnIndex})`);
+            }
 
             const player = state.players.find(p => p.id === userId);
 
