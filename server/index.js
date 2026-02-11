@@ -1304,207 +1304,178 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 5.5 Mix Juice Actions
-    socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callback) => {
-        try {
-            const room = await prisma.room.findUnique({ where: { code: roomId } });
-            if (!room) return sendAck(callback, false, 'Room not found');
-            const game = await getActiveGame(room.id);
-            let state = JSON.parse(game.stateJson);
+// 5.5 Mix Juice Actions
+socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callback) => {
+    try {
+        const room = await prisma.room.findUnique({ where: { code: roomId } });
+        if (!room) return sendAck(callback, false, 'Room not found');
+        const game = await getActiveGame(room.id);
+        let state = JSON.parse(game.stateJson);
 
-            if (state.phase !== 'mixjuice') return sendAck(callback, false, 'Not playing Mix Juice');
-            const mj = state.mixjuice;
+        if (state.phase !== 'mixjuice') return sendAck(callback, false, 'Not playing Mix Juice');
+        const mj = state.mixjuice;
 
-            // ---【修正】手番リストの自動修復 (Auto-Repair Turn Seat) ---
-            const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
-            const activeIds = activePlayers.map(p => p.id);
+        // ---【修正】手番リストの自動修復 (Auto-Repair Turn Seat) ---
+        const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
+        const activeIds = activePlayers.map(p => p.id);
 
-            // turnSeatにいない人が混ざっていたら再構築
-            let isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
+        // 不整合チェック
+        let isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
 
-            // Critical Fix: If the ACting user is not in the seat, force repair immediately
-            if (!mj.turnSeat.includes(userId) && activeIds.includes(userId)) {
-                isSeatInvalid = true;
+        // Critical Fix: If the ACting user is not in the seat, force repair immediately
+        if (!mj.turnSeat.includes(userId) && activeIds.includes(userId)) {
+            isSeatInvalid = true;
+        }
+
+        if (isSeatInvalid) {
+            console.log("[MixJuice] Repairing turnSeat...", { old: mj.turnSeat, new: activeIds });
+            mj.turnSeat = activeIds;
+            mj.turnIndex = 0;
+        }
+
+        if (mj.turnIndex >= mj.turnSeat.length) mj.turnIndex = 0;
+
+        const turnPlayerId = mj.turnSeat[mj.turnIndex];
+
+        // 2. 厳格な手番チェック (デバッグ情報付き)
+        if (userId !== turnPlayerId) {
+            return sendAck(callback, false, `あなたの番ではありません (Turn:${turnPlayerId?.slice(-4)} You:${userId.slice(-4)})`);
+        }
+
+        const player = state.players.find(p => p.id === userId);
+
+        // 3. アクション処理
+        if (type === 'pass') {
+            state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
+        }
+        else if (type === 'change') {
+            if (mj.deck.length === 0) return sendAck(callback, false, '山札がありません');
+
+            let idx = targetIndex;
+            if (typeof idx !== 'number' || !player.hand[idx]) idx = 0;
+
+            if (player.hand[idx]) {
+                const discarded = player.hand.splice(idx, 1)[0];
+                mj.discard.push(discarded);
+                player.hand.push(mj.deck.pop());
+                state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
             }
+        }
+        else if (type === 'shuffle_hand') {
+            if (mj.deck.length < 2) return sendAck(callback, false, '山札不足です');
+            while (player.hand.length > 0) mj.discard.push(player.hand.pop());
+            player.hand.push(mj.deck.pop());
+            player.hand.push(mj.deck.pop());
+            state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
+        }
 
-            if (isSeatInvalid) {
-                console.log("[MixJuice] Repairing turnSeat...", { old: mj.turnSeat, new: activeIds });
-                mj.turnSeat = activeIds;
-                mj.turnIndex = 0; // 安全のためリセット
-            }
+        // 4. ターン進行
+        mj.turnCount++;
+        mj.turnIndex = (mj.turnIndex + 1) % mj.turnSeat.length;
 
-            // turnIndexの範囲外チェック
-            if (mj.turnIndex >= mj.turnSeat.length) mj.turnIndex = 0;
-            // -------------------------------------------------------
+        // バージョン情報
+        state.debugVersion = "v6.1 DEBUG";
 
-            const turnPlayerId = mj.turnSeat[mj.turnIndex];
-            if (userId !== turnPlayerId) {
-                return sendAck(callback, false, `あなたの番ではありません (T:${turnPlayerId?.slice(0, 4)} Y:${userId?.slice(0, 4)} I:${mj.turnIndex})`);
-            }
+        // --- Round End Check ---
+        const turnsPerRound = mj.turnSeat.length * 3;
+        if (mj.turnCount >= turnsPerRound) {
+            state.chat.push({ sender: 'System', message: `--- ラウンド ${mj.round} 終了 ---`, timestamp: Date.now() });
 
-            const player = state.players.find(p => p.id === userId);
-
-            // --- Action Logic ---
-            if (type === 'pass') {
-                state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
-            }
-            else if (type === 'change') {
-                if (mj.deck.length === 0) return sendAck(callback, false, '山札がありません');
-
-                // 【修正】インデックス指定がない場合は0番目をデフォルトとする
-                let idx = targetIndex;
-                if (typeof idx !== 'number' || !player.hand[idx]) idx = 0;
-
-                if (player.hand[idx]) {
-                    const discarded = player.hand.splice(idx, 1)[0];
-                    mj.discard.push(discarded);
-                    player.hand.push(mj.deck.pop());
-                    state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+            const roundResults = [];
+            activePlayers.forEach(p => {
+                const hasZero = p.hand.some(c => (c.meta?.value === 0 || c.text?.includes('Value: 0') || c.name.includes('0')));
+                let sum = 0;
+                if (!hasZero) {
+                    p.hand.forEach(c => {
+                        let val = c.meta?.value;
+                        if (val === undefined) {
+                            const m = c.name.match(/\d+/);
+                            if (m) val = parseInt(m[0]);
+                            else val = 0;
+                        }
+                        sum += val;
+                    });
+                } else {
+                    sum = 0;
                 }
+                roundResults.push({ id: p.id, name: p.name, sum, hasZero });
+            });
+
+            const candidates = roundResults.filter(r => !r.hasZero && r.sum >= 7).sort((a, b) => b.sum - a.sum);
+
+            if (candidates.length > 0) {
+                let currentRank = 1;
+                const groups = {};
+                candidates.forEach(c => {
+                    if (!groups[c.sum]) groups[c.sum] = [];
+                    groups[c.sum].push(c);
+                });
+                const sortedSums = Object.keys(groups).map(Number).sort((a, b) => b - a);
+
+                if (sortedSums[0]) {
+                    groups[sortedSums[0]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 2);
+                    state.chat.push({ sender: 'System', message: `1位 (+2pt): ${groups[sortedSums[0]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                }
+                if (sortedSums[1]) {
+                    groups[sortedSums[1]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 1);
+                    state.chat.push({ sender: 'System', message: `2位 (+1pt): ${groups[sortedSums[1]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                }
+
+                mj.lastRoundResult = {
+                    round: mj.round,
+                    rankings: candidates.map((c, i) => ({
+                        ...c,
+                        rank: (i === 0 || candidates[i - 1].sum > c.sum) ? i + 1 : i,
+                        scoreDelta: (groups[c.sum] === groups[sortedSums[0]]) ? 2 : (groups[c.sum] === groups[sortedSums[1]] ? 1 : 0)
+                    }))
+                };
+
+            } else {
+                state.chat.push({ sender: 'System', message: `勝者なし (全員7未満 or 0ドボン)`, timestamp: Date.now() });
+                mj.lastRoundResult = { round: mj.round, rankings: [] };
             }
-            else if (type === 'shuffle_hand') { // Fridge
-                if (mj.deck.length < 2) return sendAck(callback, false, '山札不足です');
-                while (player.hand.length > 0) mj.discard.push(player.hand.pop());
-                player.hand.push(mj.deck.pop());
-                player.hand.push(mj.deck.pop());
-                state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
-            }
 
-            // --- Turn Advance ---
-            mj.turnCount++;
-            mj.turnIndex = (mj.turnIndex + 1) % mj.turnSeat.length;
+            mj.round++;
+            if (mj.round > mj.roundMax) {
+                state.phase = 'finished';
+                state.chat.push({ sender: 'System', message: `ゲーム終了！全5ラウンド完了。`, timestamp: Date.now() });
+            } else {
+                mj.turnCount = 0;
+                mj.turnIndex = 0;
+                const firstSeat = mj.turnSeat.shift();
+                mj.turnSeat.push(firstSeat);
 
-            // --- Round End Check ---
-            // Round ends when everyone has acted 3 times.
-            // turnCount starts at 0.
-            // activePlayers.length * 3 turns per round.
-            // Example: 2 players -> 6 turns.
-            const turnsPerRound = mj.turnSeat.length * 3;
-            if (mj.turnCount >= turnsPerRound) {
-                // Round End Scoring
-                state.chat.push({ sender: 'System', message: `--- ラウンド ${mj.round} 終了 ---`, timestamp: Date.now() });
-
-                // Calculate Scores
-                // 1. Calc Sums
-                const roundResults = [];
                 activePlayers.forEach(p => {
-                    const hasZero = p.hand.some(c => (c.meta?.value === 0 || c.text?.includes('Value: 0') || c.name.includes('0')));
-                    let sum = 0;
-                    if (!hasZero) {
-                        p.hand.forEach(c => {
-                            // Try meta value, fallback to parsing text/name
-                            let val = c.meta?.value;
-                            if (val === undefined) {
-                                // Minimal parsing for fallback (e.g. "Red 5")
-                                const m = c.name.match(/\d+/);
-                                if (m) val = parseInt(m[0]);
-                                else val = 0;
-                            }
-                            sum += val;
-                        });
-                    } else {
-                        sum = 0; // 0 card rule
-                    }
-                    roundResults.push({ id: p.id, name: p.name, sum, hasZero });
+                    while (p.hand.length > 0) mj.discard.push(p.hand.pop());
                 });
 
-                // 2. Rank & Award
-                // Filter those with sum >= 7 (Candidates)
-                const candidates = roundResults.filter(r => !r.hasZero && r.sum >= 7).sort((a, b) => b.sum - a.sum);
-
-                if (candidates.length > 0) {
-                    // Distribute Points
-                    // Logic: 1st (+2), 2nd (+1). Ties share rank.
-                    let currentRank = 1;
-                    let lastSum = -1;
-
-                    // Actually simpler grouping:
-                    const groups = {}; // sum -> [ids]
-                    candidates.forEach(c => {
-                        if (!groups[c.sum]) groups[c.sum] = [];
-                        groups[c.sum].push(c);
-                    });
-                    const sortedSums = Object.keys(groups).map(Number).sort((a, b) => b - a);
-
-                    // 1st Place Group
-                    if (sortedSums[0]) {
-                        groups[sortedSums[0]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 2);
-                        state.chat.push({ sender: 'System', message: `1位 (+2pt): ${groups[sortedSums[0]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                if (mj.deck.length < activePlayers.length * 2) {
+                    mj.deck = [...mj.deck, ...mj.discard];
+                    mj.discard = [];
+                    for (let i = mj.deck.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [mj.deck[i], mj.deck[j]] = [mj.deck[j], mj.deck[i]];
                     }
-                    // 2nd Place Group
-                    if (sortedSums[1]) {
-                        groups[sortedSums[1]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 1);
-                        state.chat.push({ sender: 'System', message: `2位 (+1pt): ${groups[sortedSums[1]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
-                    }
-
-                    // Save Result for Frontend Modal
-                    // Convert roundResults to a map or array easier for client
-                    mj.lastRoundResult = {
-                        round: mj.round,
-                        rankings: candidates.map((c, i) => ({
-                            ...c,
-                            rank: (i === 0 || candidates[i - 1].sum > c.sum) ? i + 1 : i, // Simple rank (1, 2, 3...)
-                            scoreDelta: (groups[c.sum] === groups[sortedSums[0]]) ? 2 : (groups[c.sum] === groups[sortedSums[1]] ? 1 : 0)
-                        }))
-                    };
-
-                } else {
-                    state.chat.push({ sender: 'System', message: `勝者なし (全員7未満 or 0ドボン)`, timestamp: Date.now() });
-                    mj.lastRoundResult = { round: mj.round, rankings: [] };
                 }
 
-                // 3. Next Round Setup
-                mj.round++;
-                if (mj.round > mj.roundMax) {
-                    // Game Over
-                    state.phase = 'finished';
-                    // Calculation Final Winner (optional log)
-                    state.chat.push({ sender: 'System', message: `ゲーム終了！全5ラウンド完了。`, timestamp: Date.now() });
-                } else {
-                    // Reset Turn
-                    mj.turnCount = 0;
-                    mj.turnIndex = 0; // Reset to first player or rotate start player? User simplistic: "turn 0".
-                    // Rotate dealer/start player
-                    const firstSeat = mj.turnSeat.shift();
-                    mj.turnSeat.push(firstSeat);
+                activePlayers.forEach(p => {
+                    p.hand.push(mj.deck.pop());
+                    p.hand.push(mj.deck.pop());
+                });
 
-                    // Deal new hands (Discard old hands first)
-                    activePlayers.forEach(p => {
-                        while (p.hand.length > 0) mj.discard.push(p.hand.pop());
-                    });
-
-                    // Shuffle Discard into Deck if needed 
-                    // Simple logic: if deck < players*2 (rounded), reshuffle.
-                    if (mj.deck.length < activePlayers.length * 2) {
-                        mj.deck = [...mj.deck, ...mj.discard];
-                        mj.discard = [];
-                        // Shuffle
-                        for (let i = mj.deck.length - 1; i > 0; i--) {
-                            const j = Math.floor(Math.random() * (i + 1));
-                            [mj.deck[i], mj.deck[j]] = [mj.deck[j], mj.deck[i]];
-                        }
-                    }
-
-                    // Deal
-                    activePlayers.forEach(p => {
-                        p.hand.push(mj.deck.pop());
-                        p.hand.push(mj.deck.pop());
-                    });
-
-                    state.chat.push({ sender: 'System', message: `ラウンド ${mj.round} 開始`, timestamp: Date.now() });
-                }
+                state.chat.push({ sender: 'System', message: `ラウンド ${mj.round} 開始`, timestamp: Date.now() });
             }
-
-            // Save & Broadcast
-            await saveGameState(game.id, state);
-            await broadcastState(room.code, state);
-            sendAck(callback, true);
-
-        } catch (e) {
-            console.error(e);
-            sendAck(callback, false, e.message);
         }
-    });
+
+        await saveGameState(game.id, state);
+        await broadcastState(room.code, state);
+        sendAck(callback, true);
+
+    } catch (e) {
+        console.error(e);
+        sendAck(callback, false, e.message);
+    }
+});
 
     // 6. Old Maid Actions
     socket.on('oldmaid_start_game', async ({ roomId, userId, useCurrentDeck, confirm }, callback) => {
