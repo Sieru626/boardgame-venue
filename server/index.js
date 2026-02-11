@@ -912,14 +912,15 @@ io.on('connection', (socket) => {
                 }
             }
             else if (type === 'play_card') {
-                // Strict Rule: Disable table-play for Mix Juice & Old Maid
-                if (state.phase === 'mixjuice' || state.phase === 'oldmaid') {
-                    return sendAck(callback, false, 'このゲームモードでは場にカードを出せません');
+                // ---【修正】ルール厳格化ガード ---
+                if (state.phase === 'oldmaid' || state.phase === 'mixjuice') {
+                    return sendAck(callback, false, 'このゲームモードでは手札を場に出せません');
                 }
+                // -------------------------------
 
                 // Collision Check (Optimistic Locking)
                 if (payload.version !== undefined && state.version !== undefined && payload.version !== state.version) {
-                    return sendAck(callback, false, 'Simultaneous action detected (Version Mismatch). Please try again.');
+                    return sendAck(callback, false, 'Simultaneous action detected. Please retry.');
                 }
 
                 if (player.hand[payload.index]) {
@@ -1312,38 +1313,26 @@ io.on('connection', (socket) => {
             let state = JSON.parse(game.stateJson);
 
             if (state.phase !== 'mixjuice') return sendAck(callback, false, 'Not playing Mix Juice');
-
             const mj = state.mixjuice;
+
+            // ---【修正】手番リストの自動修復 (Auto-Repair Turn Seat) ---
             const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
-            // --- Strict Turn & Seat Synchronization ---
-            // 1. Rebuild turnSeat to match currently active (online/non-spectator) players
-            const currentActiveIds = activePlayers.map(p => p.id);
-            // Check if turnSeat is stale (length mismatch or missing IDs)
-            let seatStale = false;
-            if (mj.turnSeat.length !== currentActiveIds.length) seatStale = true;
-            else {
-                for (const pid of mj.turnSeat) {
-                    if (!currentActiveIds.includes(pid)) { seatStale = true; break; }
-                }
+            const activeIds = activePlayers.map(p => p.id);
+
+            // turnSeatにいない人が混ざっていたら再構築
+            const isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
+            if (isSeatInvalid) {
+                console.log("[MixJuice] Repairing turnSeat...");
+                mj.turnSeat = activeIds;
+                mj.turnIndex = 0; // 安全のためリセット
             }
 
-            if (seatStale) {
-                console.warn(`[MixJuice] Seat mismatch detected. Rebuilding turnSeat. Old: ${mj.turnSeat.length}, New: ${currentActiveIds.length}`);
-                // Simple rebuild: just take active players in order.
-                // ideally preserving order, but for MVP recovery, just resetting is safer.
-                mj.turnSeat = currentActiveIds;
-                mj.turnIndex = 0; // Reset turn to first player to avoid OOB
-                state.chat.push({ sender: 'System', message: 'プレイヤー人数変更によりターン順がリセットされました', timestamp: Date.now() });
-            }
-
-            // 2. Bounds Check (Redundant but safe)
-            if (mj.turnIndex >= mj.turnSeat.length) {
-                console.warn(`[MixJuice] Fixed OOB turnIndex: ${mj.turnIndex} -> 0`);
-                mj.turnIndex = 0;
-            }
+            // turnIndexの範囲外チェック
+            if (mj.turnIndex >= mj.turnSeat.length) mj.turnIndex = 0;
+            // -------------------------------------------------------
 
             const turnPlayerId = mj.turnSeat[mj.turnIndex];
-            if (userId !== turnPlayerId) return sendAck(callback, false, '手番ではありません');
+            if (userId !== turnPlayerId) return sendAck(callback, false, 'あなたの番ではありません');
 
             const player = state.players.find(p => p.id === userId);
 
@@ -1352,26 +1341,22 @@ io.on('connection', (socket) => {
                 state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
             }
             else if (type === 'change') {
-                // Fallback: If targetIndex is invalid but hand has cards, default to 0
-                let actualIndex = targetIndex;
-                if ((typeof actualIndex !== 'number' || !player.hand[actualIndex]) && player.hand.length > 0) {
-                    // console.log(`[MixJuice] Invalid targetIndex ${targetIndex}, defaulting to 0`);
-                    actualIndex = 0;
-                }
-
-                if (typeof actualIndex !== 'number' || !player.hand[actualIndex]) return sendAck(callback, false, 'Card not found or hand empty');
                 if (mj.deck.length === 0) return sendAck(callback, false, '山札がありません');
 
-                const discarded = player.hand.splice(actualIndex, 1)[0];
-                mj.discard.push(discarded);
-                player.hand.push(mj.deck.pop());
-                state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+                // 【修正】インデックス指定がない場合は0番目をデフォルトとする
+                let idx = targetIndex;
+                if (typeof idx !== 'number' || !player.hand[idx]) idx = 0;
+
+                if (player.hand[idx]) {
+                    const discarded = player.hand.splice(idx, 1)[0];
+                    mj.discard.push(discarded);
+                    player.hand.push(mj.deck.pop());
+                    state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+                }
             }
             else if (type === 'shuffle_hand') { // Fridge
                 if (mj.deck.length < 2) return sendAck(callback, false, '山札不足です');
-                // Discard all (should be 2)
                 while (player.hand.length > 0) mj.discard.push(player.hand.pop());
-                // Draw 2
                 player.hand.push(mj.deck.pop());
                 player.hand.push(mj.deck.pop());
                 state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
