@@ -850,6 +850,30 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                 )
             }
 
+            {/* Bottom: Player Hand */}
+            <div className="flex-none bg-gray-900 border-t border-gray-800 relative z-20 pb-safe">
+                {/* Hand Actions / Area */}
+                <div className="min-h-[160px] flex flex-col justify-end">
+
+                    {/* Hand Area */}
+                    <div className="p-4 overflow-x-auto">
+                        <h3 className="text-white text-sm font-bold mb-2">手札 ({myPlayer?.hand.length})</h3>
+                        <div className="flex space-x-2 pb-4 min-w-max">
+                            <AnimatePresence mode='popLayout'>
+                                {(myPlayer?.hand || []).map((card: any, idx: number) => (
+                                    <Card
+                                        key={card.id || idx}
+                                        card={card}
+                                        onClick={() => isMyTurn ? playCard(idx) : alert('あなたのターンではありません')}
+                                        className={`${isMyTurn ? 'ring-2 ring-blue-400 hover:ring-4' : 'opacity-80'}`}
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {
                 myPlayer?.isSpectator && (
                     <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-black/80 px-6 py-2 rounded-full border border-gray-600 text-gray-400 font-bold pointer-events-none z-50">
