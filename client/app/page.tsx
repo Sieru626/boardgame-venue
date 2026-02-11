@@ -87,7 +87,7 @@ function HomeContent() {
   return (
     <main className="h-screen overflow-y-auto bg-gray-900 text-white p-4 md:p-8">
       <div className="max-w-md mx-auto space-y-8 pb-20">
-        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-red-500">(v5 Viewport Fix)</span></h1>
+        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-red-500">(v5 Viewport Fixed)</span></h1>
 
         {/* Status */}
         <div className="text-center text-sm">
