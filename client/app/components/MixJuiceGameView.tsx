@@ -166,21 +166,23 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                     {/* Render cards */}
                     {myPlayer.hand.map((card: any, idx: number) => {
                         // Visibility Check
-                        // If Dealing: show only if idx < dealStep
-                        // If Playing/Result: show always (unless we want to hide during result? Spec says nothing, usually keep it)
                         const isVisible = uiPhase === 'dealing' ? idx < dealStep : true;
+                        if (!isVisible) return <div key={idx} className="w-32 h-44 border-2 border-white/10 rounded opacity-20" />;
 
-                        if (!isVisible) return <div key={idx} className="w-32 h-44 border-2 border-white/10 rounded opacity-20" />; // Placeholder space?
+                        // Detect Change (Swap)
+                        const prevCard = prevHand.current[idx];
+                        const isChanged = prevCard && prevCard.id !== card.id && uiPhase === 'playing';
 
                         // Interaction logic
                         const canInteract = mjActionPending === 'change' && !isBlocked;
 
                         return (
                             <div
-                                key={idx}
+                                key={card.id || idx} // Use ID to force re-render/anim on change
                                 className={`
                                     relative transition-all duration-300 pointer-events-auto
                                     ${uiPhase === 'dealing' ? 'animate-in slide-in-from-bottom-20 fade-in duration-300' : ''}
+                                    ${isChanged ? 'animate-pulse ring-4 ring-green-400 rounded-lg' : ''}
                                     ${canInteract ? 'cursor-pointer hover:-translate-y-8 hover:scale-110 z-50' : ''}
                                 `}
                                 onClick={() => {
@@ -195,8 +197,14 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                                     className={`
                                         w-32 h-44 shadow-2xl border-2 border-gray-700
                                         ${canInteract ? 'ring-4 ring-yellow-400' : ''}
+                                        ${isChanged ? 'shadow-[0_0_30px_rgba(74,222,128,0.6)] border-green-400' : ''}
                                     `}
                                 />
+                                {isChanged && (
+                                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 text-green-400 font-black text-xl animate-bounce whitespace-nowrap drop-shadow-md">
+                                        NEW!
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
