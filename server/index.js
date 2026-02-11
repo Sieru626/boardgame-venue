@@ -269,6 +269,68 @@ app.get('/api/games', async (req, res) => {
             console.log(`Created template: ${mjTitle}`);
         }
 
+        // Seed Old Maid (Force Upsert)
+        const omTitle = 'ババ抜き';
+        const existingOM = games.find(g => g.title === omTitle);
+        // Default deck for Old Maid is generated if empty, but let's be explicit if needed.
+        // For now, we rely on the client or server runtime to generate the actual card objects if deckJson is empty/basic.
+        // logic below (generateDefaultTemplate) creates the deck.
+        // Here we just need the template entry.
+        const omDeckJson = JSON.stringify({ piles: [] });
+
+        if (existingOM) {
+            await prisma.gameTemplate.update({
+                where: { id: existingOM.id },
+                data: {
+                    title: omTitle,
+                    rulesText: 'ペアを捨てて手札を減らします。最後までジョーカーを持っていた人の負けです。',
+                    updatedAt: new Date()
+                }
+            });
+        } else {
+            await prisma.gameTemplate.create({
+                data: {
+                    title: omTitle,
+                    mode: 'oldmaid',
+                    type: 'oldmaid',
+                    rulesText: 'ペアを捨てて手札を減らします。最後までジョーカーを持っていた人の負けです。',
+                    deckJson: omDeckJson,
+                    ruleConfig: '{}',
+                    ruleCardsJson: '[]'
+                }
+            });
+            console.log(`Created template: ${omTitle}`);
+        }
+
+        // Seed Memory (Force Upsert)
+        const memTitle = '神経衰弱';
+        const existingMem = games.find(g => g.title === memTitle);
+        const memDeckJson = JSON.stringify({ piles: [] });
+
+        if (existingMem) {
+            await prisma.gameTemplate.update({
+                where: { id: existingMem.id },
+                data: {
+                    title: memTitle,
+                    rulesText: '裏向きのカードをめくってペアを揃えます。多くのペアを取った人が勝ちです。',
+                    updatedAt: new Date()
+                }
+            });
+        } else {
+            await prisma.gameTemplate.create({
+                data: {
+                    title: memTitle,
+                    mode: 'memory',
+                    type: 'memory',
+                    rulesText: '裏向きのカードをめくってペアを揃えます。多くのペアを取った人が勝ちです。',
+                    deckJson: memDeckJson,
+                    ruleConfig: '{}',
+                    ruleCardsJson: '[]'
+                }
+            });
+            console.log(`Created template: ${memTitle}`);
+        }
+
         // Re-fetch
         games = await prisma.gameTemplate.findMany({
             select: { id: true, title: true, mode: true, type: true, revision: true, updatedAt: true },

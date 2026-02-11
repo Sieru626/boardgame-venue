@@ -11,6 +11,15 @@
 - **Language**: TypeScript throughout
 - **State Definition**: Server-authoritative state synced via WebSocket (`state_update` events).
 
+## 3. デプロイメント (Deployment)
+- **Method**: Infrastructure as Code (IaC) via `render.yaml`.
+- **Platform**: Render (Web Service + Managed PostgreSQL).
+- **Configuration**:
+    - **Blueprint**: `render.yaml` defines the environment.
+    - **Build**: Client build (`next build`) + Server install (`npm install`) + Prisma generate.
+    - **Start**: `npm run start:render` (includes `db:push` with --accept-data-loss)
+    - **Env**: `NODE_ENV=production`, `DATABASE_URL` auto-linked.
+
 ## 3. 実装済み機能 (Features)
 
 ### コアシステム
@@ -48,6 +57,7 @@
 - **バグ修正**: `Card.tsx` で発生していた `TypeError` (カード名の未定義エラー) を修正。`MemoryGameView` から適切なプロパティを渡すように変更。
 - **リファクタリング**: サーバーサイド (`server/index.js`) の重複コードを削除し、メンテナンス性を向上。
 - **機能追加**: ゲームライブラリに削除ボタンを追加 (`DELETE /api/games/:id`)。
+- **インフラ (Infrastructure)**: `render.yaml` を導入。Client/Serverのビルドプロセスを統合し、`start:render` でのDBスキーマ同期を自動化。
 
 ## 5. ディレクトリ構造 (Key Files)
 - `apps/web`: Next.js フロントエンド
@@ -57,3 +67,13 @@
 - `apps/api`: Express サーバー
     - `server/index.js`: WebSocketハンドラ、APIエンドポイント、ゲームロジック（`start_game`, `memory_flip` 等）。
 - `packages/database`: Prisma schema (`Game`, `Room`, `GameTemplate`).
+
+## 6. 直近の対応と課題 (Current Status & Issues)
+- **対応済み**:
+    - ゲームライブラリの自動復旧ロジックを修正。
+    - 「ババ抜き」「神経衰弱」もライブラリに表示されるように `server/index.js` を更新。
+- **現在の課題**:
+    - 本番環境 (Render) で変更が反映されていない（デプロイ待ちの可能性大）。
+- **次のアクション**:
+    - コードの変更を GitHub にプッシュし、Render へのデプロイを完了させる。
+    - ゲームライブラリから「ババ抜き」「神経衰弱」が選択できるか確認する。
