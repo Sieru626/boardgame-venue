@@ -32,7 +32,9 @@ export default function RoomPage() {
     const [msg, setMsg] = useState('');
     const [showLibrary, setShowLibrary] = useState(false);
     const [showPostGameEditor, setShowPostGameEditor] = useState(false);
-    const [activeTab, setActiveTab] = useState<'board' | 'chat' | 'status'>('board');
+    const [showLibrary, setShowLibrary] = useState(false);
+    const [showPostGameEditor, setShowPostGameEditor] = useState(false);
+    const [activeTab, setActiveTab] = useState<'board' | 'log' | 'status'>('board');
 
     // Layout Refs
     const logEndRef = useRef<HTMLDivElement>(null);
@@ -140,9 +142,9 @@ export default function RoomPage() {
             <header className="h-12 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
                 <div className="flex items-center gap-4">
                     <span className="font-bold text-blue-400">BoardGame Venue</span>
-                    <span className="text-gray-500 text-xs">部屋番号: {roomId}</span>
+                    <span className="text-gray-500 text-xs hidden md:inline">部屋番号: {roomId}</span>
                     <button
-                        className="ml-2 px-2 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 rounded text-xs border border-blue-800 transition flex items-center gap-1"
+                        className="ml-2 px-2 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 rounded text-xs border border-blue-800 transition hidden md:flex items-center gap-1"
                         onClick={() => {
                             const url = `${window.location.origin}/room/${roomId}`;
                             navigator.clipboard.writeText(url);
@@ -154,7 +156,7 @@ export default function RoomPage() {
                     {state.phase === 'oldmaid' && <span className="px-2 py-0.5 bg-green-900 text-green-300 rounded text-xs border border-green-700">🃏 ババ抜きプレイ中</span>}
                 </div>
                 <div className="flex items-center gap-4 text-xs">
-                    <div className="flex gap-2">
+                    <div className="hidden md:flex gap-2">
                         {state.players.map(p => (
                             <button
                                 key={p.id}
@@ -180,14 +182,14 @@ export default function RoomPage() {
                             </button>
                         ))}
                     </div>
-                    {myPlayer && <span className="text-blue-300 font-bold">{myPlayer.name}</span>}
+                    {myPlayer && <span className="text-blue-300 font-bold hidden md:inline">{myPlayer.name}</span>}
                 </div>
             </header>
 
             {/* Main Grid */}
             <main className="flex-1 flex flex-col md:grid md:grid-cols-[300px_1fr_350px] min-h-0 overflow-hidden relative">
                 {/* Left: Log */}
-                <section className={`bg-gray-900/50 border-r border-gray-800 flex-col min-h-0 ${activeTab === 'chat' ? 'flex' : 'hidden'} md:flex`}>
+                <section className={`bg-gray-900/50 border-r border-gray-800 flex-col min-h-0 ${activeTab === 'log' ? 'flex' : 'hidden'} md:flex`}>
                     <div className="p-2 border-b border-gray-800 text-xs font-bold uppercase tracking-widest text-gray-500">ログ / チャット</div>
                     <div className="flex-1 overflow-y-auto p-2 text-sm space-y-2 font-mono">
                         {(state.chat || []).map((c: any, i: number) => (
@@ -238,25 +240,25 @@ export default function RoomPage() {
             {/* Mobile Bottom Nav */}
             <nav className="md:hidden h-14 bg-gray-900 border-t border-gray-800 flex shrink-0 z-50">
                 <button
-                    onClick={() => setActiveTab('chat')}
-                    className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'chat' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
+                    onClick={() => setActiveTab('log')}
+                    className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'log' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
                 >
                     <span className="text-lg">💬</span>
-                    <span className="text-[10px] font-bold">チャット</span>
+                    <span className="text-[10px] font-bold">ログ</span>
                 </button>
                 <button
                     onClick={() => setActiveTab('board')}
                     className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'board' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
                 >
                     <span className="text-lg">🎲</span>
-                    <span className="text-[10px] font-bold">ボード</span>
+                    <span className="text-[10px] font-bold">盤面</span>
                 </button>
                 <button
                     onClick={() => setActiveTab('status')}
                     className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'status' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
                 >
                     <span className="text-lg">ℹ️</span>
-                    <span className="text-[10px] font-bold">ステータス</span>
+                    <span className="text-[10px] font-bold">自分</span>
                 </button>
             </nav>
 
