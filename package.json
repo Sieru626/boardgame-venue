@@ -1,10 +1,8 @@
 {
-  "scripts": {
-    "build": "npm ci --prefix client && npm ci --prefix server && npm run build --prefix client",
-    "start": "node server/index.js"
+"scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js",
+    "start:render": "npx prisma db push && node index.js",
+    "db:push": "npx prisma db push",
+    "db:studio": "npx prisma studio"
   },
-  "dependencies": {
-    "@google/genai": "^1.37.0",
-    "socket.io-client": "^4.8.3"
-  }
-}

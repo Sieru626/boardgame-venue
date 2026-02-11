@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: boardgame-venue
+    env: node
+    rootDir: server
+    buildCommand: cd ../client && npm install && npx next build && cp -r .next ../server/ && cp -r public ../server/ && cd ../server && npm install && npx prisma generate
+    startCommand: npm run start:render
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:./dev.db
