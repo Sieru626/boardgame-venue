@@ -77,7 +77,7 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
     const fetchGames = async () => {
         setLoading(true);
         try {
-            const res = await fetch('http://localhost:3010/api/games');
+            const res = await fetch('/api/games');
             const data = await res.json();
             setGames(data);
         } catch (e) {
@@ -102,7 +102,7 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
     const handleSave = async () => {
         if (!saveTitle) return alert('タイトルは必須です');
         try {
-            const res = await fetch('http://localhost:3010/api/games', {
+            const res = await fetch('/api/games', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -170,7 +170,7 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
                                                         onClick={async () => {
                                                             if (!confirm(`「${t.title}」を削除しますか？この操作は取り消せません。`)) return;
                                                             try {
-                                                                const res = await fetch(`http://localhost:3010/api/games/${t.id}`, { method: 'DELETE' });
+                                                                const res = await fetch(`/api/games/${t.id}`, { method: 'DELETE' });
                                                                 if (res.ok) {
                                                                     alert('削除しました');
                                                                     fetchGames();
