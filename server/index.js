@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
 // Let's keep it minimal for now to avoid conflict.
 
 
-app.use(express.static('public')); // Serve Emergency Client
+// app.use(express.static('public')); // Serve Emergency Client
 
 // --- HTTP AI Endpoints (Stateless) ---
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
