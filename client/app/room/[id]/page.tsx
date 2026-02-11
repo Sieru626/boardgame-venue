@@ -32,6 +32,7 @@ export default function RoomPage() {
     const [msg, setMsg] = useState('');
     const [showLibrary, setShowLibrary] = useState(false);
     const [showPostGameEditor, setShowPostGameEditor] = useState(false);
+    const [activeTab, setActiveTab] = useState<'board' | 'chat' | 'status'>('board');
 
     // Layout Refs
     const logEndRef = useRef<HTMLDivElement>(null);
@@ -184,9 +185,9 @@ export default function RoomPage() {
             </header>
 
             {/* Main Grid */}
-            <main className="flex-1 grid grid-cols-[300px_1fr_350px] min-h-0 overflow-hidden">
+            <main className="flex-1 flex flex-col md:grid md:grid-cols-[300px_1fr_350px] min-h-0 overflow-hidden relative">
                 {/* Left: Log */}
-                <section className="bg-gray-900/50 border-r border-gray-800 flex flex-col min-h-0">
+                <section className={`bg-gray-900/50 border-r border-gray-800 flex-col min-h-0 ${activeTab === 'chat' ? 'flex' : 'hidden'} md:flex`}>
                     <div className="p-2 border-b border-gray-800 text-xs font-bold uppercase tracking-widest text-gray-500">ログ / チャット</div>
                     <div className="flex-1 overflow-y-auto p-2 text-sm space-y-2 font-mono">
                         {(state.chat || []).map((c: any, i: number) => (
@@ -207,19 +208,22 @@ export default function RoomPage() {
                 </section>
 
                 {/* Center: Board */}
-                <UnifiedTable
-                    socket={socket}
-                    roomId={roomId}
-                    userId={userId}
-                    state={state}
-                    drawCard={drawCard}
-                    playCard={playCard}
-                    rollDice={rollDice}
-                    deckEditorOpen={showPostGameEditor}
-                />
+                <div className={`relative flex-1 flex flex-col min-h-0 overflow-hidden ${activeTab === 'board' ? 'flex' : 'hidden'} md:flex`}>
+                    <UnifiedTable
+                        socket={socket}
+                        roomId={roomId}
+                        userId={userId}
+                        state={state}
+                        drawCard={drawCard}
+                        playCard={playCard}
+                        rollDice={rollDice}
+                        deckEditorOpen={showPostGameEditor}
+                    />
+                </div>
 
                 {/* Right: Tabs */}
                 <RightPane
+                    className={`${activeTab === 'status' ? 'flex' : 'hidden'} md:flex`}
                     state={state}
                     myPlayer={myPlayer}
                     socket={socket}
@@ -230,6 +234,31 @@ export default function RoomPage() {
                     onOpenEditor={() => setShowPostGameEditor(true)}
                 />
             </main>
+
+            {/* Mobile Bottom Nav */}
+            <nav className="md:hidden h-14 bg-gray-900 border-t border-gray-800 flex shrink-0 z-50">
+                <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'chat' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
+                >
+                    <span className="text-lg">💬</span>
+                    <span className="text-[10px] font-bold">チャット</span>
+                </button>
+                <button
+                    onClick={() => setActiveTab('board')}
+                    className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'board' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
+                >
+                    <span className="text-lg">🎲</span>
+                    <span className="text-[10px] font-bold">ボード</span>
+                </button>
+                <button
+                    onClick={() => setActiveTab('status')}
+                    className={`flex-1 flex flex-col items-center justify-center gap-1 ${activeTab === 'status' ? 'text-blue-400 bg-gray-800' : 'text-gray-500'}`}
+                >
+                    <span className="text-lg">ℹ️</span>
+                    <span className="text-[10px] font-bold">ステータス</span>
+                </button>
+            </nav>
 
             {/* Global Overlays */}
             {showPostGameEditor && (
@@ -264,7 +293,9 @@ import PostGameDeckEditor from '../../components/PostGameDeckEditor';
 
 // ... (existing helper function RightPane)
 
-function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibrary, onOpenEditor }: any) {
+// ... (existing helper function RightPane)
+
+function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibrary, onOpenEditor, className }: any) {
     const [tab, setTab] = useState('my');
     const [isProcessing, setIsProcessing] = useState(false);
 
@@ -279,7 +310,7 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
     };
 
     return (
-        <section className="bg-gray-900 border-l border-gray-800 flex flex-col min-h-0 border-r border-black relative">
+        <section className={`bg-gray-900 border-l border-gray-800 flex flex-col min-h-0 border-r border-black relative ${className || ''}`}>
 
             <div className="flex border-b border-gray-800 shrink-0">
                 <button onClick={() => setTab('my')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition ${tab === 'my' ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-400' : 'text-gray-500 hover:text-gray-300'}`}>自分</button>
