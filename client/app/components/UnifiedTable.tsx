@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Socket } from 'socket.io-client';
+import { AnimatePresence } from 'framer-motion';
 import Card from './Card';
 import GameSetupOverlay from './GameSetupOverlay';
 import MemoryGameView from './MemoryGameView';

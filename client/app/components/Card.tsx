@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 
 type CardProps = {
     card: string | { name: string; text?: string;[key: string]: any };
@@ -71,11 +72,18 @@ export default function Card({ card, isFaceDown, onClick, className = '', style 
     }
 
     return (
-        <div
+        <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, y: -50 }}
+            whileHover={{ y: -15, scale: 1.05, transition: { duration: 0.2 } }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 400, damping: 25 }}
             onClick={onClick}
             className={`
                 relative w-20 h-28 rounded-lg shadow-md border border-gray-300 select-none
-                transition-transform hover:scale-105 cursor-pointer flex flex-col items-center justify-center
+                transition-transform cursor-pointer flex flex-col items-center justify-center
                 overflow-hidden bg-white
                 ${className}
             `}
@@ -162,6 +170,6 @@ export default function Card({ card, isFaceDown, onClick, className = '', style 
                     {cardName}
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 }
