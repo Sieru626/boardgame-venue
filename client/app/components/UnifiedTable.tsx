@@ -297,7 +297,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
 
             {/* Phase 3: Timer & Config Header */}
             {isFreeTalk && (
-                <div className="absolute top-0 w-full flex flex-wrap justify-between items-start pt-2 px-4 md:px-20 z-10 pointer-events-none gap-2">
+                <div className="absolute top-0 w-full flex flex-col md:flex-row justify-between items-start pt-2 px-4 md:px-20 z-10 pointer-events-none gap-2">
 
                     {/* Timer */}
                     <div className="bg-gray-900/90 border border-gray-600 rounded px-4 py-2 pointer-events-auto flex flex-col items-center shadow-lg">
