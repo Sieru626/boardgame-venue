@@ -85,7 +85,7 @@ function HomeContent() {
   const reloadPage = () => window.location.reload();
 
   return (
-    <main className="h-screen overflow-y-auto bg-gray-900 text-white p-8">
+    <main className="h-screen overflow-y-auto bg-gray-900 text-white p-4 md:p-8">
       <div className="max-w-md mx-auto space-y-8 pb-20">
         <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場</h1>
 
@@ -121,7 +121,7 @@ function HomeContent() {
           <label className="block text-sm font-medium">ニックネーム</label>
           <input
             type="text"
-            className="w-full bg-gray-700 p-3 rounded text-white"
+            className="w-full bg-gray-700 h-12 px-3 rounded text-white text-lg"
             placeholder="ニックネームを入力..."
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
@@ -139,7 +139,7 @@ function HomeContent() {
               <p className="text-gray-400 text-sm mb-4">新しいルームを作成し、ゲームの設定を行います。</p>
               <button
                 onClick={handleCreateRoom}
-                className="w-full bg-blue-600 hover:bg-blue-700 p-4 rounded font-bold text-lg transition"
+                className="w-full bg-blue-600 hover:bg-blue-700 h-14 rounded font-bold text-lg transition flex items-center justify-center"
               >
                 ルームを新規作成
               </button>
@@ -156,7 +156,7 @@ function HomeContent() {
 
             <button
               onClick={handleJoinRoom}
-              className="w-full bg-green-600 hover:bg-green-700 p-4 rounded font-bold text-lg transition"
+              className="w-full bg-green-600 hover:bg-green-700 h-14 rounded font-bold text-lg transition flex items-center justify-center"
             >
               {inviteCode ? '▶ 参加する' : 'ルームコードを入力'}
             </button>
