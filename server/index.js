@@ -1154,11 +1154,19 @@ io.on('connection', (socket) => {
                     }
 
                     // 4. Init State（turnSeat = ババ抜きの order と同様、開始時に1回だけ設定。以後変更しない）
+                    // 先攻が毎回ホスト固定にならないように、ラウンド1開始時に座席順をランダムにローテーションする
+                    const baseOrder = activePlayers.map(p => p.id);
+                    let turnSeat = baseOrder;
+                    if (baseOrder.length > 1) {
+                        const offset = Math.floor(Math.random() * baseOrder.length);
+                        turnSeat = [...baseOrder.slice(offset), ...baseOrder.slice(0, offset)];
+                    }
+
                     state.mixjuice = {
                         status: 'playing',
                         round: 1,
                         roundMax: 5,
-                        turnSeat: activePlayers.map(p => p.id),
+                        turnSeat,
                         turnIndex: 0,
                         turnCount: 0,
                         scores: activePlayers.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}),
