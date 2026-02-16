@@ -67,6 +67,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
     const [activeEffects, setActiveEffects] = useState<{ [key: string]: string }>({}); // ID -> EffectClass
     const [_, setTick] = useState(0); // For Timer Force Update
     const [expandHeader, setExpandHeader] = useState(true); // Phase 3 UX: Accordion Header
+    const [isHandCollapsed, setIsHandCollapsed] = useState(false); // 手札パネルの開閉（場が見えづらい問題対策）
 
     // --- Phase 3: Visual State ---
     const [revealPopup, setRevealPopup] = useState<{ title: string, text: string, type: 'scene' | 'law' } | null>(null);
@@ -730,6 +731,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                     state={state}
                     socket={socket}
                     drawCard={drawCard}
+                    onEnterChangeMode={() => setMjActionPending('change')}
                 />
             )}
 
@@ -810,8 +812,10 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
 
                                                     if (isMixJuice) {
                                                         if (mjActionPending === 'change') {
-                                                            socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: realIndex });
-                                                            setMjActionPending('none');
+                                                            socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: realIndex }, (res: any) => {
+                                                                if (!res?.ok) alert(res?.error ?? 'エラー');
+                                                                else setMjActionPending('none');
+                                                            });
                                                         }
                                                         return;
                                                     }
@@ -831,47 +835,63 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
             }
 
             {/* Bottom: Player Hand */}
-            <div className="flex-none bg-gray-900 border-t border-gray-800 relative z-20 pb-safe">
+            <div className="flex-none bg-gray-900/95 border-t border-gray-800 relative z-20 pb-safe">
                 {/* Hand Actions / Area */}
-                <div className="min-h-[160px] flex flex-col justify-end">
+                <div className="min-h-[72px] flex flex-col justify-end">
 
                     {/* Hand Area */}
-                    <div className="p-4 overflow-x-auto">
-                        <h3 className="text-white text-sm font-bold mb-2">手札 ({myPlayer?.hand.length})</h3>
-                        <div className="flex space-x-2 pb-4 min-w-max">
-                            <AnimatePresence mode='popLayout'>
-                                {(myPlayer?.hand || []).map((card: any, idx: number) => (
-                                    <Card
-                                        key={card.id || idx}
-                                        card={card}
-                                        onClick={() => {
-                                            if (!isMyTurn) return alert('あなたのターンではありません');
-
-                                            // STRICT RULE: MixJuice & OldMaid cannot play to table
-                                            if (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') {
-                                                if (mjActionPending === 'change') {
-                                                    // Only allow click if we are in "Change" mode
-                                                    socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: idx });
-                                                    setMjActionPending('none');
-                                                }
-                                                return;
-                                            }
-                                            if (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') {
-                                                // Own hand is completely non-interactive in Old Maid
-                                                return;
-                                            }
-
-                                            playCard(idx);
-                                        }}
-                                        className={`${(state.selectedMode === 'mixjuice' && mjActionPending === 'change') ? 'ring-4 ring-yellow-400 cursor-pointer animate-pulse' :
-                                                (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') ? 'cursor-default opacity-100' :
-                                                    (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') ? 'cursor-default opacity-100' :
-                                                        isMyTurn ? 'ring-2 ring-blue-400 hover:ring-4 cursor-pointer' : 'opacity-80'
-                                            }`}
-                                    />
-                                ))}
-                            </AnimatePresence>
+                    <div className="px-4 pt-2 pb-3 overflow-x-auto">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-white text-sm font-bold">手札 ({myPlayer?.hand.length})</h3>
+                            <button
+                                onClick={() => setIsHandCollapsed(prev => !prev)}
+                                className="text-xs text-gray-300 border border-gray-600 rounded-full px-2 py-0.5 hover:bg-gray-800 transition"
+                            >
+                                {isHandCollapsed ? '表示' : '隠す'}
+                            </button>
                         </div>
+                        {!isHandCollapsed && (
+                            <div className="flex space-x-2 pb-1 min-w-max">
+                                <AnimatePresence mode='popLayout'>
+                                    {(myPlayer?.hand || []).map((card: any, idx: number) => (
+                                        <Card
+                                            key={card.id || idx}
+                                            card={card}
+                                            onClick={() => {
+                                                // MixJuice: チェンジモード時のみ手札クリックで捨てるカードを送信
+                                                if (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') {
+                                                    if (!isMyTurnMJ) {
+                                                        alert('（サーバー基準で）あなたの番ではありません');
+                                                        return;
+                                                    }
+                                                    if (mjActionPending !== 'change') {
+                                                        return; // チェンジボタン押下後に手札を選ぶ
+                                                    }
+                                                    socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: idx }, (res: any) => {
+                                                        if (!res?.ok) alert(res?.error ?? 'エラー');
+                                                        else setMjActionPending('none');
+                                                    });
+                                                    return;
+                                                }
+                                                if (!isMyTurn) return alert('あなたのターンではありません');
+                                                if (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') {
+                                                    // Own hand is completely non-interactive in Old Maid
+                                                    return;
+                                                }
+
+                                                playCard(idx);
+                                            }}
+                                            className={`${(state.phase === 'mixjuice' && mjActionPending === 'change') ? 'ring-2 ring-amber-400 hover:ring-4 cursor-pointer' :
+                                                    (state.selectedMode === 'mixjuice') ? 'cursor-pointer' :
+                                                    (state.selectedMode === 'oldmaid' || state.phase === 'oldmaid') ? 'cursor-default opacity-100' :
+                                                        (state.selectedMode === 'mixjuice' || state.phase === 'mixjuice') ? 'cursor-default opacity-100' :
+                                                            isMyTurn ? 'ring-2 ring-blue-400 hover:ring-4 cursor-pointer' : 'opacity-80'
+                                                }`}
+                                        />
+                                    ))}
+                                </AnimatePresence>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

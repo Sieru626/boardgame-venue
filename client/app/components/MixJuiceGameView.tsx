@@ -9,11 +9,12 @@ type Props = {
     state: any; // Full game state passed down, or at least { players, mixjuice, ... }
     socket: any;
     drawCard: () => void; // Fallback helper
+    onEnterChangeMode?: () => void; // チェンジボタン押下時：手札選択モードに入る
 };
 
 type UIPhase = 'idle' | 'dealing' | 'playing' | 'result';
 
-export default function MixJuiceGameView({ roomId, userId, state, socket }: Props) {
+export default function MixJuiceGameView({ roomId, userId, state, socket, onEnterChangeMode }: Props) {
     const { mixjuice: mjData, players } = state;
     const myPlayer = players.find((p: Player) => p.id === userId);
 
@@ -48,15 +49,14 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                 const hasZero = prevHand.current.some(card => card.value === 0);
 
                 resultToShow = {
-                    round: prevRound.current, // This result is for the round that just finished
+                    round: prevRound.current,
                     rankings: [{
                         id: userId,
                         name: myPlayer?.name || 'You',
-                        sum: sum,
-                        hasZero: hasZero,
-                        isWin: sum >= 7 && !hasZero,
+                        sum,
+                        hasZero,
+                        rank: 1, // フォールバック時は自分だけなので1位扱い
                     }],
-                    // Add other players with dummy data or just omit for simplicity
                 };
                 console.warn(`Fallback: lastRoundResult missing for round ${prevRound.current}. Calculated local result:`, resultToShow);
             }
@@ -95,13 +95,11 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
 
     const isMyTurn = mjData.turnSeat && mjData.turnSeat[mjData.turnIndex] === userId;
     const isBlocked = uiPhase !== 'playing';
-    const [mjActionPending, setMjActionPending] = useState<'none' | 'change'>('none');
 
-    // Result Calculation
+    // Result Calculation（WIN は「1位」のときのみ表示。合計7以上・0なしは2位でも満たすため両方WINにならないよう rank で判定）
     const myRankData = resultModalData?.rankings?.find((r: any) => r.id === userId);
-    // Fallback display if no rank data but we have a result structure
     const mySum = myRankData?.sum ?? 0;
-    const isWin = myRankData ? (mySum >= 7 && !myRankData.hasZero) : false;
+    const isWin = myRankData?.rank === 1;
 
     return (
         <div className="absolute inset-0 z-0">
@@ -128,21 +126,25 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                 <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-[90] flex gap-4 animate-in slide-in-from-bottom-10 fade-in duration-300">
                     <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 shadow-xl flex gap-4">
                         <button
-                            onClick={() => socket.emit('mixjuice_action', { roomId, userId, type: 'pass' })}
+                            onClick={() => socket.emit('mixjuice_action', { roomId, userId, type: 'pass' }, (res: any) => {
+                                if (!res?.ok) alert(res?.error ?? 'エラー');
+                            })}
                             className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg border border-gray-500 active:scale-95 transition"
                         >
                             パス
                         </button>
                         <button
-                            onClick={() => setMjActionPending(mjActionPending === 'change' ? 'none' : 'change')}
-                            className={`font-bold py-3 px-8 rounded-lg shadow-lg border active:scale-95 transition ${mjActionPending === 'change' ? 'bg-yellow-500 text-black border-yellow-300 animate-pulse' : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400'}`}
+                            onClick={() => onEnterChangeMode?.()}
+                            className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg border border-amber-400 active:scale-95 transition"
                         >
-                            {mjActionPending === 'change' ? '選択...' : 'チェンジ'}
+                            チェンジ
                         </button>
                         <button
                             onClick={() => {
                                 if (confirm('手札を全て捨てて2枚引き直しますか？')) {
-                                    socket.emit('mixjuice_action', { roomId, userId, type: 'shuffle_hand' });
+                                    socket.emit('mixjuice_action', { roomId, userId, type: 'shuffle_hand' }, (res: any) => {
+                                        if (!res?.ok) alert(res?.error ?? 'エラー');
+                                    });
                                 }
                             }}
                             className="bg-pink-600 hover:bg-pink-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg border border-pink-400 active:scale-95 transition"
@@ -150,13 +152,6 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                             冷蔵庫
                         </button>
                     </div>
-                </div>
-            )}
-
-            {/* Change Guide */}
-            {mjActionPending === 'change' && !isBlocked && (
-                <div className="absolute top-32 left-1/2 -translate-x-1/2 bg-yellow-500 text-black font-bold px-4 py-2 rounded shadow-lg animate-bounce z-[100]">
-                    捨てるカードを選んでください
                 </div>
             )}
 
@@ -173,9 +168,6 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                         const prevCard = prevHand.current[idx];
                         const isChanged = prevCard && prevCard.id !== card.id && uiPhase === 'playing';
 
-                        // Interaction logic
-                        const canInteract = mjActionPending === 'change' && !isBlocked;
-
                         return (
                             <div
                                 key={card.id || idx} // Use ID to force re-render/anim on change
@@ -183,20 +175,12 @@ export default function MixJuiceGameView({ roomId, userId, state, socket }: Prop
                                     relative transition-all duration-300 pointer-events-auto
                                     ${uiPhase === 'dealing' ? 'animate-in slide-in-from-bottom-20 fade-in duration-300' : ''}
                                     ${isChanged ? 'animate-pulse ring-4 ring-green-400 rounded-lg' : ''}
-                                    ${canInteract ? 'cursor-pointer hover:-translate-y-8 hover:scale-110 z-50' : ''}
                                 `}
-                                onClick={() => {
-                                    if (canInteract) {
-                                        socket.emit('mixjuice_action', { roomId, userId, type: 'change', targetIndex: idx });
-                                        setMjActionPending('none');
-                                    }
-                                }}
                             >
                                 <Card
                                     card={card}
                                     className={`
                                         w-32 h-44 shadow-2xl border-2 border-gray-700
-                                        ${canInteract ? 'ring-4 ring-yellow-400' : ''}
                                         ${isChanged ? 'shadow-[0_0_30px_rgba(74,222,128,0.6)] border-green-400' : ''}
                                     `}
                                 />

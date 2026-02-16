@@ -34,7 +34,7 @@ const server = http.createServer(app);
 
 // CORS Configuration
 const clientUrls = process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : [];
-const allowedOrigins = dev ? ["http://localhost:3000"] : (clientUrls.length > 0 ? clientUrls : "*");
+const allowedOrigins = dev ? ["http://localhost:3000", "http://localhost:3002", "http://localhost:3010"] : (clientUrls.length > 0 ? clientUrls : "*");
 
 const io = new Server(server, {
     cors: {
@@ -1127,8 +1127,7 @@ io.on('connection', (socket) => {
                     state.chat.push({ sender: 'System', message: '神経衰弱が開始されました！', timestamp: Date.now() });
 
                 } else if (mode === 'mixjuice') {
-                    // === Mix Juice Start Logic ===
-                    // 1. Players
+                    // === Mix Juice Start（ババ抜きと同じ: 観戦以外かつ status===online で order を1回だけ設定）===
                     const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
                     if (activePlayers.length < 2) return sendAck(callback, false, 'プレイヤー(観戦以外)が2人以上必要です');
 
@@ -1154,7 +1153,7 @@ io.on('connection', (socket) => {
                         [deck[i], deck[j]] = [deck[j], deck[i]];
                     }
 
-                    // 4. Init State
+                    // 4. Init State（turnSeat = ババ抜きの order と同様、開始時に1回だけ設定。以後変更しない）
                     state.mixjuice = {
                         status: 'playing',
                         round: 1,
@@ -1164,7 +1163,8 @@ io.on('connection', (socket) => {
                         turnCount: 0,
                         scores: activePlayers.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}),
                         deck: deck,
-                        discard: []
+                        discard: [],
+                        playerCount: activePlayers.length
                     };
                     state.players.forEach(p => p.hand = []);
 
@@ -1304,7 +1304,7 @@ io.on('connection', (socket) => {
         }
     });
 
-// 5.5 Mix Juice Actions
+// 5.5 Mix Juice Actions（ババ抜きと同じ方式: turnSeat[turnIndex] が「今の手番」。修復なし）
 socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callback) => {
     try {
         const room = await prisma.room.findUnique({ where: { code: roomId } });
@@ -1314,35 +1314,31 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
 
         if (state.phase !== 'mixjuice') return sendAck(callback, false, 'Not playing Mix Juice');
         const mj = state.mixjuice;
+        if (!mj || !mj.turnSeat || mj.turnSeat.length === 0) return sendAck(callback, false, 'ゲーム状態が不正です');
 
-        // ---【修正】手番リストの自動修復 (Auto-Repair Turn Seat) ---
-        const activePlayers = state.players.filter(p => !p.isSpectator && p.status === 'online');
-        const activeIds = activePlayers.map(p => p.id);
+        // ババ抜きと同様: 現在の手番 = turnSeat[turnIndex] のみ。配列は書き換えない
+        let idx = mj.turnIndex;
+        if (idx < 0 || idx >= mj.turnSeat.length) idx = 0;
+        mj.turnIndex = idx;
 
-        // 不整合チェック
-        let isSeatInvalid = mj.turnSeat.some(id => !activeIds.includes(id)) || mj.turnSeat.length !== activeIds.length;
+        const currentTurnId = mj.turnSeat[mj.turnIndex];
+        const currentTurnPlayer = state.players.find(p => p.id === currentTurnId);
+        const youInSeat = mj.turnSeat.indexOf(userId);
+        const youInPlayers = state.players.find(p => p.id === userId);
 
-        // Critical Fix: If the ACting user is not in the seat, force repair immediately
-        if (!mj.turnSeat.includes(userId) && activeIds.includes(userId)) {
-            isSeatInvalid = true;
-        }
-
-        if (isSeatInvalid) {
-            console.log("[MixJuice] Repairing turnSeat...", { old: mj.turnSeat, new: activeIds });
-            mj.turnSeat = activeIds;
-            mj.turnIndex = 0;
-        }
-
-        if (mj.turnIndex >= mj.turnSeat.length) mj.turnIndex = 0;
-
-        const turnPlayerId = mj.turnSeat[mj.turnIndex];
-
-        // 2. 厳格な手番チェック (デバッグ情報付き)
-        if (userId !== turnPlayerId) {
-            return sendAck(callback, false, `あなたの番ではありません (Turn:${turnPlayerId?.slice(-4)} You:${userId.slice(-4)})`);
+        if (userId !== currentTurnId) {
+            let reason = '';
+            if (typeof userId !== 'string' || !userId) reason = '送信されたuserIdが空または不正です';
+            else if (!youInPlayers) reason = `送信されたuserIdがルームのプレイヤーにいません(あなた:${userId.slice(-6)})`;
+            else if (youInSeat === -1) reason = `あなたは手番順(turnSeat)に含まれていません。開始時に参加していましたか？(あなた:${userId.slice(-6)}, turnSeat長:${mj.turnSeat.length})`;
+            else reason = `今の手番は${mj.turnIndex + 1}番目(${currentTurnPlayer?.name || currentTurnId?.slice(-6)})です。あなたは${youInSeat + 1}番目(${youInPlayers?.name || userId?.slice(-6)})です。`;
+            const msg = `[ミックスジュース] あなたの番ではありません。理由: ${reason}(turnIndex=${mj.turnIndex}, turnCount=${mj.turnCount})`;
+            console.warn('[MixJuice] Turn mismatch:', { userId, currentTurnId, turnIndex: mj.turnIndex, turnSeat: mj.turnSeat, youInSeat });
+            return sendAck(callback, false, msg);
         }
 
         const player = state.players.find(p => p.id === userId);
+        if (!player) return sendAck(callback, false, 'プレイヤーが見つかりません');
 
         // 3. アクション処理
         if (type === 'pass') {
@@ -1373,16 +1369,16 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
         mj.turnCount++;
         mj.turnIndex = (mj.turnIndex + 1) % mj.turnSeat.length;
 
-        // バージョン情報
-        state.debugVersion = "v6.1 DEBUG";
+        state.debugVersion = "v7.0 MixJuice turn = OldMaid style (order only, no repair)";
 
         // --- Round End Check ---
         const turnsPerRound = mj.turnSeat.length * 3;
         if (mj.turnCount >= turnsPerRound) {
             state.chat.push({ sender: 'System', message: `--- ラウンド ${mj.round} 終了 ---`, timestamp: Date.now() });
 
+            const activePlayersForRound = state.players.filter(p => !p.isSpectator);
             const roundResults = [];
-            activePlayers.forEach(p => {
+            activePlayersForRound.forEach(p => {
                 const hasZero = p.hand.some(c => (c.meta?.value === 0 || c.text?.includes('Value: 0') || c.name.includes('0')));
                 let sum = 0;
                 if (!hasZero) {
@@ -1401,35 +1397,39 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
                 roundResults.push({ id: p.id, name: p.name, sum, hasZero });
             });
 
+            // ルール: 3-4人→上位2名がVP、5-6人→上位3名がVP。1位+2pt・2位+1pt・3位(5-6人のみ)+1pt
             const candidates = roundResults.filter(r => !r.hasZero && r.sum >= 7).sort((a, b) => b.sum - a.sum);
+            const n = (mj.playerCount || mj.turnSeat.length) || 2;
+            const winSlots = n <= 4 ? 2 : 3;
 
             if (candidates.length > 0) {
-                let currentRank = 1;
                 const groups = {};
                 candidates.forEach(c => {
                     if (!groups[c.sum]) groups[c.sum] = [];
                     groups[c.sum].push(c);
                 });
                 const sortedSums = Object.keys(groups).map(Number).sort((a, b) => b - a);
-
-                if (sortedSums[0]) {
-                    groups[sortedSums[0]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 2);
-                    state.chat.push({ sender: 'System', message: `1位 (+2pt): ${groups[sortedSums[0]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                let place = 1;
+                for (const sum of sortedSums) {
+                    if (place > winSlots) break;
+                    const pts = place === 1 ? 2 : (place === 2 ? 1 : (place === 3 && winSlots >= 3 ? 1 : 0));
+                    if (pts > 0) {
+                        groups[sum].forEach(c => { mj.scores[c.id] = (mj.scores[c.id] || 0) + pts; });
+                        state.chat.push({ sender: 'System', message: `${place}位 (+${pts}pt): ${groups[sum].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                    }
+                    place++;
                 }
-                if (sortedSums[1]) {
-                    groups[sortedSums[1]].forEach(c => mj.scores[c.id] = (mj.scores[c.id] || 0) + 1);
-                    state.chat.push({ sender: 'System', message: `2位 (+1pt): ${groups[sortedSums[1]].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
-                }
 
+                let rankNum = 1;
                 mj.lastRoundResult = {
                     round: mj.round,
-                    rankings: candidates.map((c, i) => ({
-                        ...c,
-                        rank: (i === 0 || candidates[i - 1].sum > c.sum) ? i + 1 : i,
-                        scoreDelta: (groups[c.sum] === groups[sortedSums[0]]) ? 2 : (groups[c.sum] === groups[sortedSums[1]] ? 1 : 0)
-                    }))
+                    rankings: candidates.map((c, i) => {
+                        const sameRankAsPrev = i > 0 && candidates[i - 1].sum === c.sum;
+                        if (!sameRankAsPrev) rankNum = i + 1;
+                        const scoreDelta = rankNum === 1 ? 2 : (rankNum === 2 ? 1 : (rankNum === 3 && winSlots >= 3 ? 1 : 0));
+                        return { ...c, rank: rankNum, scoreDelta };
+                    })
                 };
-
             } else {
                 state.chat.push({ sender: 'System', message: `勝者なし (全員7未満 or 0ドボン)`, timestamp: Date.now() });
                 mj.lastRoundResult = { round: mj.round, rankings: [] };
@@ -1445,11 +1445,11 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
                 const firstSeat = mj.turnSeat.shift();
                 mj.turnSeat.push(firstSeat);
 
-                activePlayers.forEach(p => {
+                activePlayersForRound.forEach(p => {
                     while (p.hand.length > 0) mj.discard.push(p.hand.pop());
                 });
 
-                if (mj.deck.length < activePlayers.length * 2) {
+                if (mj.deck.length < activePlayersForRound.length * 2) {
                     mj.deck = [...mj.deck, ...mj.discard];
                     mj.discard = [];
                     for (let i = mj.deck.length - 1; i > 0; i--) {
@@ -1458,7 +1458,7 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
                     }
                 }
 
-                activePlayers.forEach(p => {
+                activePlayersForRound.forEach(p => {
                     p.hand.push(mj.deck.pop());
                     p.hand.push(mj.deck.pop());
                 });

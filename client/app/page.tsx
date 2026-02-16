@@ -14,19 +14,17 @@ function HomeContent() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    // Load nickname
     const stored = localStorage.getItem('nickname');
     if (stored) setNickname(stored);
 
-    // Timeout Check logic
     const timeoutId = setTimeout(() => {
       if (loading) setConnectionError(true);
-    }, 10000); // 10s timeout
+    }, 10000);
 
-    // Connect to backend
-    // Connect to backend (Relative in production)
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     const socketInstance = socketUrl
       ? io(socketUrl, { transports: ["websocket", "polling"], withCredentials: true })
@@ -37,39 +35,53 @@ function HomeContent() {
       console.log('Connected to backend');
       setLoading(false);
       setConnectionError(false);
+      setIsConnected(true);
       clearTimeout(timeoutId);
+    });
+
+    socketInstance.on('disconnect', () => {
+      setIsConnected(false);
     });
 
     return () => {
       socketInstance.disconnect();
       clearTimeout(timeoutId);
     };
-  }, []); // Note: 'loading' dep in effect causing loops? No, loading is used in timeout callback closure. Ideally use ref or clean logic.
-  // Better: just set timeout once, if it fires and still loading, set error.
+  }, []);
 
-
-  // ... Handlers ...
   const handleCreateRoom = () => {
-    if (!nickname) return alert('ニックネームを入力してください');
+    if (!nickname) {
+      alert('ニックネームを入力してください');
+      return;
+    }
+    if (!socket?.connected) {
+      alert('サーバーに接続されていません。表示が「オンライン」になってからもう一度お試しください。');
+      return;
+    }
+
     localStorage.setItem('nickname', nickname);
 
-    // Generate/Get userId
     let userId = localStorage.getItem('userId');
     if (!userId) {
       userId = crypto.randomUUID();
       localStorage.setItem('userId', userId);
     }
 
-    if (socket) {
-      socket.emit('create_room', { nickname, userId }, (res: any) => {
-        if (res.ok && res.data.roomId) {
-          router.push(`/room/${res.data.roomId}`);
-        } else {
-          // res.error contains the detailed message from server (or "Unknown error")
-          alert("作成に失敗しました:\n" + (res.error || '不明なエラー'));
-        }
-      });
-    }
+    setCreating(true);
+    const ackTimeout = setTimeout(() => {
+      setCreating(false);
+      alert('ルーム作成がタイムアウトしました。サーバーが起動しているか確認し、再読み込みしてやり直してください。');
+    }, 15000);
+
+    socket.emit('create_room', { nickname, userId }, (res: any) => {
+      clearTimeout(ackTimeout);
+      setCreating(false);
+      if (res?.ok && res?.data?.roomId) {
+        router.push(`/room/${res.data.roomId}`);
+      } else {
+        alert("作成に失敗しました:\n" + (res?.error || '不明なエラー'));
+      }
+    });
   };
 
   const handleJoinRoom = () => {
@@ -84,12 +96,13 @@ function HomeContent() {
 
   const reloadPage = () => window.location.reload();
 
+  const canCreateRoom = isConnected && socket && !creating;
+
   return (
     <main className="h-screen overflow-y-auto bg-gray-900 text-white p-4 md:p-8">
       <div className="max-w-md mx-auto space-y-8 pb-20">
-        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-red-500">(v5 Viewport Fixed)</span></h1>
+        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-red-500">(v7.2 MixJuice Turn & Result Fix)</span></h1>
 
-        {/* Status */}
         <div className="text-center text-sm">
           {connectionError ? (
             <div className="bg-red-900/50 border border-red-500 rounded p-4 text-left">
@@ -108,7 +121,6 @@ function HomeContent() {
           )}
         </div>
 
-        {/* Invite Banner */}
         {inviteCode && (
           <div className="bg-blue-900/50 border border-blue-500 p-4 rounded-lg text-center animate-pulse">
             <div className="text-sm text-blue-300 font-bold uppercase">招待されています</div>
@@ -116,7 +128,6 @@ function HomeContent() {
           </div>
         )}
 
-        {/* Nickname */}
         <div className="bg-gray-800 p-6 rounded-lg space-y-4">
           <label className="block text-sm font-medium">ニックネーム</label>
           <input
@@ -128,9 +139,7 @@ function HomeContent() {
           />
         </div>
 
-        {/* Actions */}
         <div className="grid gap-6">
-          {/* Host Section */}
           {!inviteCode && (
             <div className="bg-gray-800 p-6 rounded-lg border-2 border-transparent hover:border-blue-500 transition">
               <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-400">
@@ -139,14 +148,14 @@ function HomeContent() {
               <p className="text-gray-400 text-sm mb-4">新しいルームを作成し、ゲームの設定を行います。</p>
               <button
                 onClick={handleCreateRoom}
-                className="w-full bg-blue-600 hover:bg-blue-700 h-14 rounded font-bold text-lg transition flex items-center justify-center"
+                disabled={!canCreateRoom}
+                className="w-full h-14 rounded font-bold text-lg transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700 enabled:hover:bg-blue-700"
               >
-                ルームを新規作成
+                {creating ? '作成中...' : !isConnected ? '接続中です。しばらくお待ちください' : 'ルームを新規作成'}
               </button>
             </div>
           )}
 
-          {/* Guest Section */}
           <div className={`bg-gray-800 p-6 rounded-lg border-2 border-transparent hover:border-green-500 transition ${inviteCode ? 'border-green-500 ring-2 ring-green-500/50' : ''}`}>
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-green-400">
               <span className="text-2xl">👋</span> {inviteCode ? '招待に参加する' : 'ゲストとして参加'}
