@@ -3,6 +3,8 @@
 **GitHub 完全再現**: [Sieru626/boardgame-venue](https://github.com/Sieru626/boardgame-venue) と同じ構成です。  
 **重要: ボドゲ会場のローカル = http://localhost:3010（API）。画面は http://localhost:3000 で開きます。**
 
+- **本番デプロイ（Render）**: [docs/DEPLOY.md](docs/DEPLOY.md) — **main に push するだけ**（Render は初回設定のみ）。
+
 ## 起動手順
 
 1. **初回のみ**: `server\.env` と `client\.env.local` があること。

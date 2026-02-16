@@ -1,3 +1,5 @@
+# 本番デプロイ: Render ダッシュボードで「Deploy」押すだけ（または main に push で自動デプロイ）
+# 初回のみ: Blueprint でこのリポジトリを追加し、render.yaml を読み込む
 services:
   - type: web
     name: boardgame-venue
@@ -10,4 +12,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: file:./dev.db
+        value: file:./prisma/dev.db
+      # 本番URL（サービス名が違う場合は Render ダッシュボードで上書き）
+      - key: NEXT_PUBLIC_SOCKET_URL
+        value: https://boardgame-venue.onrender.com

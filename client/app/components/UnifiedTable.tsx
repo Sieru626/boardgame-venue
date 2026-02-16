@@ -257,7 +257,8 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
     };
     return (
     <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
-        <div className="absolute top-0 right-0 p-2 z-50 text-xs font-mono bg-red-600 text-white opacity-80 pointer-events-none">
+        {/* 画面が隠れないように、デバッグラベルを小さく右上にバッジ表示 */}
+        <div className="absolute top-1 right-1 z-50 text-[10px] font-mono text-red-200 bg-black/70 px-2 py-1 rounded-md opacity-70 pointer-events-none max-w-[220px] truncate">
             {state.debugVersion || "v6.0 (Old)"}
         </div>
 
