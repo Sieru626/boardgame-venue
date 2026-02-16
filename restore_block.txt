@@ -1,0 +1,147 @@
+
+        const reason = prompt(`${target.name}を密告する理由：`);
+        if (!reason) return;
+
+        handleFreeTalkAction('free_talk_denounce', { targetPlayerId: target.id, reason });
+    };
+
+    // Task B: Detect Hand Count Changes
+    React.useEffect(() => {
+        const counts = prevHandCounts.current;
+        state.players.forEach((p: Player) => {
+            const old = counts[p.id];
+            const current = p.hand.length;
+            if (old !== undefined && current < old) {
+                // Creating 'shrink' effect
+                setActiveEffects(prev => ({ ...prev, [p.id]: 'animate-ping' }));
+                setTimeout(() => {
+                    setActiveEffects(prev => {
+                        const n = { ...prev };
+                        delete n[p.id];
+                        return n;
+                    });
+                }, 500);
+            }
+            counts[p.id] = current;
+        });
+    }, [state.players]);
+
+    const handlePick = (targetUserId: string) => {
+        if (!socket || !isMyTurn || selectedCardIdx === null) return;
+        const version = state.version || 0;
+        socket.emit('oldmaid_pick_from_left', { roomId, userId, pickIndex: selectedCardIdx, version }, (res: any) => {
+            if (res.ok) {
+                setSelectedCardIdx(null);
+                // Show drawn card if returned
+                if (res.data?.drawnCard) {
+                    setPulledCard(res.data.drawnCard);
+                    setTimeout(() => setPulledCard(null), 1500);
+                }
+            }
+            else alert(res.error || 'Pick failed');
+        });
+    };
+
+    // --- Seating Logic ---
+    // Rotate players so "Me" is effectively at index -1 (handled separately at bottom),
+    // and the "Next" player is at index 0 (Left), etc.
+    const myIndex = state.players.findIndex((p: Player) => p.id === userId);
+    // Create ordered list of opponents starting from myIndex + 1
+    const opponents = [];
+    if (myIndex !== -1) {
+        for (let i = 1; i < state.players.length; i++) {
+            opponents.push(state.players[(myIndex + i) % state.players.length]);
+        }
+    } else {
+        // Observer mode: just show all
+        opponents.push(...state.players);
+    }
+
+    // Position Map based on opponent count
+    // 1 Opponent: Top
+    // 2 Opponents: Left, Right
+    // 3 Opponents: Left, Top, Right
+    // For MVP, generic mapping to fixed slots [Left, Top, Right]
+    const getPositionStyle = (index: number, total: number) => {
+        if (total === 1) return { top: '10px', left: '50%', transform: 'translateX(-50%)' }; // Top
+        if (total === 2) {
+            return index === 0
+                ? { top: '50%', left: '20px', transform: 'translateY(-50%)' } // Left
+                : { top: '50%', right: '20px', transform: 'translateY(-50%)' }; // Right
+        }
+        // 3+ layout (Clockwise from Left)
+        if (index === 0) return { top: '50%', left: '20px', transform: 'translateY(-50%)' }; // Left
+        if (index === 1) return { top: '10px', left: '50%', transform: 'translateX(-50%)' }; // Top
+        if (index === 2) return { top: '50%', right: '20px', transform: 'translateY(-50%)' }; // Right
+
+        // Fallback for 4th+ (Just stack them Top?)
+        return { top: '10px', left: `${20 + index * 10}%` };
+    };
+
+    return (
+        <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
+            {/* --- v6.1 DEBUG LABEL --- */}
+            <div className="absolute top-0 right-0 p-2 z-50 text-xs font-mono bg-red-600 text-white opacity-80 pointer-events-none">
+                {state.debugVersion || "v6.0 (Old)"}
+            </div>
+
+            {/* Background Decor */}
+            <div className="absolute top-2 left-2 text-gray-700 font-bold text-xl opacity-20 select-none pointer-events-none tracking-widest">boardgame-venue</div>
+
+            {/* Phase 3: Reveal Popup Overlay */}
+            {revealPopup && (
+                <div className="absolute inset-0 z-[200] flex items-center justify-center pointer-events-none">
+                    <div className="bg-black/90 border-4 border-double px-8 py-6 rounded-xl animate-in zoom-in-75 duration-300 shadow-[0_0_50px_rgba(0,0,0,0.8)] text-center">
+                        <div className={`text-xs font-bold tracking-[0.5em] mb-2 ${revealPopup.type === 'scene' ? 'text-yellow-500' : 'text-red-500'}`}>
+                            {revealPopup.type === 'scene' ? 'SCENE UPDATE' : 'NEW LAW'}
+                        </div>
+                        <div className="text-4xl font-black text-white mb-2 whitespace-nowrap">{revealPopup.title}</div>
+                        <div className="text-sm text-gray-300 max-w-md mx-auto">{revealPopup.text}</div>
+                    </div>
+                </div>
+            )}
+
+            {/* Phase 3: Timer & Config Header */}
+            {isFreeTalk && (
+                <div className="absolute top-0 w-full flex flex-col md:flex-row justify-between items-start pt-2 px-4 md:px-20 z-10 pointer-events-none gap-2">
+
+                    {/* Timer */}
+                    <div className="bg-gray-900/90 border border-gray-600 rounded px-4 py-2 pointer-events-auto flex flex-col items-center shadow-lg">
+                        <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">TIME LEFT</div>
+                        <div className={`text-3xl font-mono font-bold ${timer?.isRunning ? 'text-white' : 'text-gray-500'}`}>
+                            {(() => {
+                                if (!timer?.endsAt) return `${Math.floor((timer?.roundSeconds || 300) / 60)}:00`;
+                                const left = Math.max(0, Math.floor((timer.endsAt - Date.now()) / 1000));
+                                const m = Math.floor(left / 60);
+                                const s = left % 60;
+                                return `${m}:${s.toString().padStart(2, '0')}`;
+                            })()}
+                        </div>
+
+                        {myPlayer?.isHost && (
+                            <div className="flex gap-1 mt-1">
+                                {!timer?.isRunning && <button onClick={() => handleFreeTalkAction('free_talk_timer_start')} className="px-2 py-0.5 bg-green-700 text-[10px] text-white rounded hover:bg-green-600">Start</button>}
+                                {timer?.isRunning && <button onClick={() => handleFreeTalkAction('free_talk_timer_extend')} className="px-2 py-0.5 bg-blue-700 text-[10px] text-white rounded hover:bg-blue-600">+30s</button>}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Win Config (Host Only) */}
+                    {myPlayer?.isHost && (
+                        <div className="bg-gray-900/90 border border-gray-600 rounded px-3 py-2 pointer-events-auto flex flex-col items-center">
+                            <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">WIN GOAL</div>
+                            <div className="flex gap-1">
+                                {[2, 3, 5].map(n => (
+                                    <button
+                                        key={n}
+                                        onClick={() => handleFreeTalkAction('free_talk_set_config', { winMedals: n })}
+                                        className={`px-2 py-0.5 text-xs font-bold rounded ${config?.winMedals === n ? 'bg-yellow-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                                    >
+                                        {n}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}

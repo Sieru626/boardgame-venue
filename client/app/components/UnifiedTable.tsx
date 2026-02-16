@@ -130,6 +130,130 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
     React.useEffect(() => {
         if (!timer?.isRunning) return;
         const interval = setInterval(() => setTick(t => t + 1), 200); // 5fps update
+        return () => clearInterval(interval);
+    }, [timer?.isRunning]);
+
+    // Detect Denounce in Chat (Juiciness Lite)
+    React.useEffect(() => {
+        if (!state.chat) return;
+        if (state.chat.length > prevChatLength.current) {
+            const newMsgs = state.chat.slice(prevChatLength.current);
+            newMsgs.forEach((m: any) => {
+                if (m.message && m.message.includes('密告しました')) {
+                    state.players.forEach((p: Player) => {
+                        if (m.message.includes(p.name)) {
+                            triggerShake(p.id);
+                        }
+                    });
+                }
+            });
+            prevChatLength.current = state.chat.length;
+        }
+    }, [state.chat]);
+
+    const addFloatingText = (playerId: string, text: string) => {
+        const id = Date.now();
+        setFloatingTexts(prev => ({
+            ...prev,
+            [playerId]: [...(prev[playerId] || []), { text, id }]
+        }));
+        setTimeout(() => {
+            setFloatingTexts(prev => ({
+                ...prev,
+                [playerId]: (prev[playerId] || []).filter(f => f.id !== id)
+            }));
+        }, 1000);
+    };
+
+    const triggerShake = (playerId: string) => {
+        setActiveEffects(prev => ({ ...prev, [playerId]: 'animate-shake-short' }));
+        setTimeout(() => {
+            setActiveEffects(prev => {
+                const n = { ...prev };
+                delete n[playerId];
+                return n;
+            });
+        }, 500);
+    };
+
+    const handleFreeTalkAction = (type: string, payload: any = {}) => {
+        if (!socket) return;
+        const version = state.version || 0;
+        socket.emit(type, { roomId, userId, ...payload, version }, (res: any) => {
+            if (!res.ok) alert(res.error || 'Action failed');
+        });
+    };
+
+    const handleDenounce = () => {
+        const targetName = prompt('密告相手の名前を入力してください(部分一致可) or ID');
+        if (!targetName) return;
+        const target = state.players.find((p: Player) => p.name === targetName || p.name.includes(targetName));
+        if (!target) return alert('プレイヤーが見つかりません');
+
+        const reason = prompt(`${target.name}を密告する理由：`);
+        if (!reason) return;
+
+        handleFreeTalkAction('free_talk_denounce', { targetPlayerId: target.id, reason });
+    };
+
+    // Task B: Detect Hand Count Changes
+    React.useEffect(() => {
+        const counts = prevHandCounts.current;
+        state.players.forEach((p: Player) => {
+            const old = counts[p.id];
+            const current = p.hand.length;
+            if (old !== undefined && current < old) {
+                setActiveEffects(prev => ({ ...prev, [p.id]: 'animate-ping' }));
+                setTimeout(() => {
+                    setActiveEffects(prev => {
+                        const n = { ...prev };
+                        delete n[p.id];
+                        return n;
+                    });
+                }, 500);
+            }
+            counts[p.id] = current;
+        });
+    }, [state.players]);
+
+    const handlePick = (targetUserId: string) => {
+        if (!socket || !isMyTurn || selectedCardIdx === null) return;
+        const version = state.version || 0;
+        socket.emit('oldmaid_pick_from_left', { roomId, userId, pickIndex: selectedCardIdx, version }, (res: any) => {
+            if (res.ok) {
+                setSelectedCardIdx(null);
+                if (res.data?.drawnCard) {
+                    setPulledCard(res.data.drawnCard);
+                    setTimeout(() => setPulledCard(null), 1500);
+                }
+            }
+            else alert(res.error || 'Pick failed');
+        });
+    };
+
+    // --- Seating Logic ---
+    const myIndex = state.players.findIndex((p: Player) => p.id === userId);
+    const opponents = [];
+    if (myIndex !== -1) {
+        for (let i = 1; i < state.players.length; i++) {
+            opponents.push(state.players[(myIndex + i) % state.players.length]);
+        }
+    } else {
+        opponents.push(...state.players);
+    }
+
+    const getPositionStyle = (index: number, total: number) => {
+        if (total === 1) return { top: '10px', left: '50%', transform: 'translateX(-50%)' };
+        if (total === 2) {
+            return index === 0
+                ? { top: '50%', left: '20px', transform: 'translateY(-50%)' }
+                : { top: '50%', right: '20px', transform: 'translateY(-50%)' };
+        }
+        if (index === 0) return { top: '50%', left: '20px', transform: 'translateY(-50%)' };
+        if (index === 1) return { top: '10px', left: '50%', transform: 'translateX(-50%)' };
+        if (index === 2) return { top: '50%', right: '20px', transform: 'translateY(-50%)' };
+        return { top: '10px', left: `${20 + index * 10}%` };
+    };
     return (
     <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
         <div className="absolute top-0 right-0 p-2 z-50 text-xs font-mono bg-red-600 text-white opacity-80 pointer-events-none">
@@ -777,6 +901,6 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                     </div>
                 )
             }
-        </section >
+        </section>
     );
 }
