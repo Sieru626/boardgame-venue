@@ -33,10 +33,13 @@ export default function RoomPage() {
     const [showLibrary, setShowLibrary] = useState(false);
     const [showPostGameEditor, setShowPostGameEditor] = useState(false);
     const [activeTab, setActiveTab] = useState<'board' | 'log' | 'status'>('board');
+    const [botActionBanner, setBotActionBanner] = useState<string | null>(null);
 
     // Layout Refs
     const logEndRef = useRef<HTMLDivElement>(null);
     const lastActionTime = useRef(0);
+    const lastBotMessageTime = useRef(0);
+    const botBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isChatSending, setIsChatSending] = useState(false);
 
     // Initial Connection
@@ -79,6 +82,30 @@ export default function RoomPage() {
     useEffect(() => {
         logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [state?.chat]); // Deps safe
+
+    // Bot 行動のハイライト表示
+    useEffect(() => {
+        if (!state?.chat || state.chat.length === 0) return;
+        const last = state.chat[state.chat.length - 1];
+        if (!last || last.sender !== 'System') return;
+        if (last.timestamp <= lastBotMessageTime.current) return;
+        // CPU 行動やラウンド結果など、プレイ進行に関係する System メッセージだけ拾う
+        const msg: string = last.message || '';
+        const isCpuRelated =
+            msg.includes('CPU (Lv.') ||
+            msg.includes('ラウンド') ||
+            msg.includes('勝者なし') ||
+            msg.includes('位 (+') ||
+            msg.includes('ゲーム終了');
+        if (!isCpuRelated) return;
+
+        lastBotMessageTime.current = last.timestamp;
+        setBotActionBanner(msg);
+        if (botBannerTimeoutRef.current) clearTimeout(botBannerTimeoutRef.current);
+        botBannerTimeoutRef.current = setTimeout(() => {
+            setBotActionBanner(null);
+        }, 3000);
+    }, [state?.chat]);
 
     const sendChat = (e: React.FormEvent) => {
         e.preventDefault();
@@ -215,6 +242,14 @@ export default function RoomPage() {
 
                 {/* 2. Board */}
                 <div className={`${activeTab === 'board' ? 'flex' : 'hidden'} md:flex relative flex-1 flex-col min-h-0 overflow-hidden w-full h-full`}>
+                    {botActionBanner && (
+                        <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30">
+                            <div className="bg-black/80 text-amber-200 border border-amber-400/60 rounded-full px-4 py-1 text-xs shadow-lg flex items-center gap-2">
+                                <span className="text-sm">🤖</span>
+                                <span>{botActionBanner}</span>
+                            </div>
+                        </div>
+                    )}
                     <UnifiedTable
                         socket={socket}
                         roomId={roomId}
@@ -305,8 +340,39 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
     const [tab, setTab] = useState('my');
     const [isProcessing, setIsProcessing] = useState(false);
     const [addBotFeedback, setAddBotFeedback] = useState<string | null>(null);
+    const [addBotSupported, setAddBotSupported] = useState<boolean | null>(null);
+    const addBotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const handleAddBot = (level: 'weak' | 'normal') => {
+    useEffect(() => {
+        if (!socket?.connected) return;
+        setAddBotSupported(null);
+        const t = setTimeout(() => setAddBotSupported((prev) => (prev === null ? false : prev)), 2000);
+        socket.emit('add_bot_support_check', (res: any) => {
+            clearTimeout(t);
+            setAddBotSupported(!!res?.addBotSupported);
+        });
+    }, [socket?.connected]);
+
+    useEffect(() => {
+        if (!socket) return;
+        const onResult = (res: { ok?: boolean; error?: string }) => {
+            if (addBotTimeoutRef.current) {
+                clearTimeout(addBotTimeoutRef.current);
+                addBotTimeoutRef.current = null;
+            }
+            setAddBotFeedback(null);
+            if (res?.ok) {
+                setAddBotFeedback('追加しました');
+                setTimeout(() => setAddBotFeedback(null), 2000);
+            } else {
+                alert(res?.error ?? '追加できません');
+            }
+        };
+        socket.on('add_bot_result', onResult);
+        return () => { socket.off('add_bot_result', onResult); };
+    }, [socket]);
+
+    const handleAddBot = (level: 'weak' | 'normal' | 'strong') => {
         if (!socket) {
             alert('接続されていません');
             return;
@@ -317,18 +383,22 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
         }
         if (isProcessing) return;
         setAddBotFeedback('送信中…');
-        const timeoutId = setTimeout(() => {
+        addBotTimeoutRef.current = setTimeout(() => {
+            addBotTimeoutRef.current = null;
             setAddBotFeedback((prev) => (prev === '送信中…' ? 'サーバーが応答しません。再起動またはデプロイを確認してください。' : prev));
         }, 5000);
         socket.emit('add_bot', { roomId, level }, (res: any) => {
-            clearTimeout(timeoutId);
+            if (addBotTimeoutRef.current) {
+                clearTimeout(addBotTimeoutRef.current);
+                addBotTimeoutRef.current = null;
+            }
             setAddBotFeedback(null);
             if (res?.ok) {
                 setAddBotFeedback('追加しました');
                 setTimeout(() => setAddBotFeedback(null), 2000);
                 return;
             }
-            alert(res?.error ?? '追加できません');
+            if (res?.ok === false) alert(res?.error ?? '追加できません');
         });
     };
 
@@ -397,7 +467,7 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                             <button onClick={onOpenLibrary} className="w-full bg-indigo-700 hover:bg-indigo-600 text-white py-3 rounded text-sm font-bold shadow-lg transition mb-4">📚 ゲームライブラリ</button>
                             {state.phase === 'setup' && (
                                 <div className="mb-4">
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 flex-wrap">
                                         <button
                                             type="button"
                                             onClick={() => handleAddBot('weak')}
@@ -414,15 +484,51 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                                         >
                                             🤖 CPU追加 (普通)
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAddBot('strong')}
+                                            disabled={isProcessing}
+                                            className="flex-1 bg-amber-900/60 hover:bg-amber-700 text-amber-100 py-2 rounded text-sm font-bold border border-amber-400 transition disabled:opacity-50"
+                                        >
+                                            🤖 CPU追加 (強い)
+                                        </button>
                                     </div>
                                     {addBotFeedback && (
                                         <div className="mt-2 text-xs text-amber-200/90">{addBotFeedback}</div>
+                                    )}
+                                    {addBotSupported === false && (
+                                        <div className="mt-2 text-xs text-red-300 bg-red-900/30 p-2 rounded">
+                                            CPU追加に対応したサーバーに接続されていません。server を再起動するか、最新コードで起動してください。
+                                        </div>
                                     )}
                                 </div>
                             )}
                             <button onClick={() => handleHostAction('reset_game', {}, 'ゲームをリセットしますか？')} disabled={isProcessing} className="w-full bg-red-900/50 hover:bg-red-800 text-red-200 py-2 rounded text-sm font-bold border border-red-800 transition">⚠ ゲームリセット</button>
                             <button onClick={() => handleHostAction('shuffle_deck')} disabled={isProcessing} className="w-full mt-2 bg-blue-900/50 hover:bg-blue-800 text-blue-200 py-2 rounded text-sm font-bold border border-blue-800 transition">🔀 山札シャッフル</button>
                         </div>
+                        {state.phase === 'setup' && (
+                            <div className="p-4 bg-gray-900/60 border border-gray-800 rounded space-y-3">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase">参加CPU</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {state.players.filter((p: any) => p.isBot).map((p: any) => (
+                                        <div key={p.id} className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-full px-3 py-1 text-xs text-gray-100">
+                                            <span>{p.name}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleHostAction('remove_bot', { targetUserId: p.id })}
+                                                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-700 text-[10px] leading-none hover:bg-red-600"
+                                                title="このCPUを抜く"
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {state.players.filter((p: any) => p.isBot).length === 0 && (
+                                        <span className="text-xs text-gray-500">CPUは参加していません。</span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         {/* Legacy Deck Editor - Maybe hide if new one works better? Leaving for now. */}
                         <DeckEditor socket={socket} roomId={roomId} userId={userId} currentDraft={state.draftDeck || []} isProcessing={isProcessing} onProcessStart={() => setIsProcessing(true)} onProcessEnd={() => setIsProcessing(false)} />
                     </div>

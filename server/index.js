@@ -466,6 +466,41 @@ function getCardValue(card) {
     return m ? parseInt(m[0], 10) : 0;
 }
 
+// 山札が足りないときに捨て札から補充してシャッフルする共通ヘルパー
+function ensureMixJuiceDeck(mj, needCount) {
+    if (!mj) return false;
+    if (mj.deck.length >= needCount) return true;
+
+    // 1) まず捨て札を戻して再利用
+    if (mj.discard && mj.discard.length > 0) {
+        mj.deck = [...mj.deck, ...mj.discard];
+        mj.discard = [];
+        for (let i = mj.deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [mj.deck[i], mj.deck[j]] = [mj.deck[j], mj.deck[i]];
+        }
+    }
+    if (mj.deck.length >= needCount) return true;
+
+    // 2) それでも不足する場合は、安全装置として「新しいジュースの材料を補充」する
+    //    （ゲームが途中で止まらないことを優先）
+    const tmpl = generateDefaultTemplate('mixjuice');
+    const drawPile = tmpl?.piles?.find(p => p.pileId === 'draw' || p.title === '山札');
+    if (drawPile && Array.isArray(drawPile.cards) && drawPile.cards.length > 0) {
+        const extra = JSON.parse(JSON.stringify(drawPile.cards)).map(c => ({
+            ...c,
+            id: crypto.randomUUID()
+        }));
+        mj.deck = [...mj.deck, ...extra];
+        for (let i = mj.deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [mj.deck[i], mj.deck[j]] = [mj.deck[j], mj.deck[i]];
+        }
+    }
+
+    return mj.deck.length >= needCount;
+}
+
 function decideMixJuiceActionForBot(state, botPlayer) {
     const mj = state.mixjuice;
     if (!mj || !botPlayer || !botPlayer.hand) return { type: 'pass' };
@@ -478,6 +513,7 @@ function decideMixJuiceActionForBot(state, botPlayer) {
     const canChange = mj.deck.length > 0 && hand.length > 0;
     const canShuffle = mj.deck.length >= 2;
 
+    // Lv1: ランダム寄りのゆるいCPU
     if (level === 'weak') {
         const choices = [{ type: 'pass' }];
         if (canChange) choices.push({ type: 'change', targetIndex: Math.floor(Math.random() * hand.length) });
@@ -485,7 +521,8 @@ function decideMixJuiceActionForBot(state, botPlayer) {
         return choices[Math.floor(Math.random() * choices.length)];
     }
 
-    if (level === 'normal' || level === 'strong') {
+    // Lv2: ざっくり合理的な行動（現状仕様をほぼ踏襲）
+    if (level === 'normal') {
         if (hasZero && (canChange || canShuffle)) {
             const zeroIdx = hand.findIndex(c => getCardValue(c) === 0);
             if (zeroIdx >= 0 && canChange && Math.random() < 0.7) return { type: 'change', targetIndex: zeroIdx };
@@ -498,6 +535,50 @@ function decideMixJuiceActionForBot(state, botPlayer) {
             return { type: 'change', targetIndex: worstIdx };
         }
         if (canShuffle) return { type: 'shuffle_hand' };
+        return { type: 'pass' };
+    }
+
+    // Lv3: ボドゲ慣れした感じのCPU（点差とラウンドを見てリスク調整）
+    if (level === 'strong') {
+        const scores = mj.scores || {};
+        const myScore = typeof scores[botPlayer.id] === 'number' ? scores[botPlayer.id] : 0;
+        const maxScore = Object.values(scores).length > 0 ? Math.max(...Object.values(scores)) : myScore;
+        const isBehind = maxScore > myScore;
+        const round = mj.round || 1;
+        const roundMax = mj.roundMax || 5;
+        const roundsLeft = Math.max(0, roundMax - round);
+        const needCatchUp = isBehind && roundsLeft <= 2;
+
+        // 1) 0ドボンは即処理（チェンジ優先、なければシャッフル）
+        if (hasZero && (canChange || canShuffle)) {
+            const zeroIdx = hand.findIndex(c => getCardValue(c) === 0);
+            if (canChange && zeroIdx >= 0) {
+                return { type: 'change', targetIndex: zeroIdx };
+            }
+            if (canShuffle) return { type: 'shuffle_hand' };
+        }
+
+        // 2) 既に 7 以上なら、基本は安全にパス
+        if (sum >= 7 && !hasZero) {
+            // ただし、点差が付いていて残りラウンドが少ない場合は、多少リスクを取って取りに行く
+            if (needCatchUp && canChange && mj.deck.length >= 3) {
+                const worstIdx = hand.reduce((best, c, i) => getCardValue(c) < getCardValue(hand[best]) ? i : best, 0);
+                return { type: 'change', targetIndex: worstIdx };
+            }
+            return { type: 'pass' };
+        }
+
+        // 3) 7 未満で追い付きたいときは積極的に交換
+        if (sum < 7 && canChange) {
+            const worstIdx = hand.reduce((best, c, i) => getCardValue(c) < getCardValue(hand[best]) ? i : best, 0);
+            return { type: 'change', targetIndex: worstIdx };
+        }
+
+        // 4) シャッフルは「攻めたい時の最終手段」としてのみ使う
+        if (needCatchUp && canShuffle) {
+            return { type: 'shuffle_hand' };
+        }
+
         return { type: 'pass' };
     }
 
@@ -807,14 +888,14 @@ io.on('connection', (socket) => {
             if (action.type === 'pass') {
                 state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
             } else if (action.type === 'change') {
-                if (mj.deck.length > 0 && player.hand[action.targetIndex]) {
+                if (player.hand[action.targetIndex] && ensureMixJuiceDeck(mj, 1)) {
                     const discarded = player.hand.splice(action.targetIndex, 1)[0];
                     mj.discard.push(discarded);
                     player.hand.push(mj.deck.pop());
                     state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
                 }
             } else if (action.type === 'shuffle_hand') {
-                if (mj.deck.length >= 2) {
+                if (ensureMixJuiceDeck(mj, 2)) {
                     while (player.hand.length > 0) mj.discard.push(player.hand.pop());
                     player.hand.push(mj.deck.pop());
                     player.hand.push(mj.deck.pop());
@@ -1037,22 +1118,36 @@ io.on('connection', (socket) => {
     });
 
     // 2.5 Add Bot (Host only, setup phase)
-    socket.on('add_bot', async (payload, callback) => {
-        console.log('[add_bot] received', { roomId: payload?.roomId, level: payload?.level, hasCallback: typeof callback === 'function' });
-        const cb = typeof callback === 'function' ? callback : () => {};
-        const roomId = payload?.roomId;
-        const level = payload?.level || 'weak';
+    socket.on('add_bot_support_check', (cb) => {
+        if (typeof cb === 'function') cb({ ok: true, addBotSupported: true });
+    });
+    socket.on('add_bot', async (...args) => {
+        const payload = typeof args[0] === 'object' && args[0] !== null ? args[0] : {};
+        const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+        const roomId = payload.roomId;
+        const level = payload.level || 'weak';
+        const cb = callback || (() => {});
+
+        console.log('[add_bot] received', { roomId, level, hasCb: !!callback });
+
+        const done = (ok, err) => {
+            try { sendAck(cb, ok, err); } catch (e) { console.error('[add_bot] ack err', e); }
+            console.log('[add_bot] ack sent', ok ? 'ok' : err);
+        };
+
         try {
             const userId = socket.data?.userId;
-            if (!userId) { sendAck(cb, false, '未ログインです'); return; }
-            if (!roomId) { sendAck(cb, false, 'ルームIDがありません'); return; }
+            if (!userId) { done(false, '未ログインです'); return; }
+            if (!roomId) { done(false, 'ルームIDがありません'); return; }
             const room = await prisma.room.findUnique({ where: { code: roomId } });
-            if (!room) { sendAck(cb, false, 'ルームが見つかりません'); return; }
-            if (room.hostUserId !== userId) { sendAck(cb, false, 'ホストのみCPUを追加できます'); return; }
+            if (!room) { done(false, 'ルームが見つかりません'); return; }
+            if (room.hostUserId !== userId) { done(false, 'ホストのみCPUを追加できます'); return; }
             const game = await getActiveGame(room.id);
-            if (!game) { sendAck(cb, false, 'Game not found'); return; }
+            if (!game) { done(false, 'Game not found'); return; }
             let state = JSON.parse(game.stateJson);
-            if (state.phase !== 'setup') { sendAck(cb, false, '準備中のみCPUを追加できます'); return; }
+            if (state.phase !== 'setup') { done(false, '準備中のみCPUを追加できます'); return; }
+            const existingBots = (state.players || []).filter(p => p.isBot);
+            if (existingBots.length >= 5) { done(false, 'CPUは最大5人までです'); return; }
 
             const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
             const levelLabel = level === 'normal' ? '2' : level === 'strong' ? '3' : '1';
@@ -1071,10 +1166,13 @@ io.on('connection', (socket) => {
             state.chat.push({ sender: 'System', message: `${name} が参加しました`, timestamp: Date.now() });
             await saveGameState(game.id, state);
             await broadcastState(room.code, state);
-            sendAck(cb, true);
+            done(true);
+            socket.emit('add_bot_result', { ok: true });
         } catch (e) {
             console.error('[add_bot]', e);
-            sendAck(cb, false, e.message || 'エラー');
+            const errMsg = e.message || 'エラー';
+            done(false, errMsg);
+            socket.emit('add_bot_result', { ok: false, error: errMsg });
         }
     });
 
@@ -1224,6 +1322,24 @@ io.on('connection', (socket) => {
                     });
                     updated = true;
                 }
+            }
+            else if (type === 'remove_bot') {
+                if (state.phase !== 'setup') return sendAck(callback, false, '準備中(Setup Phase)のみCPUを削除できます');
+
+                const targetId = payload.targetUserId;
+                const idx = state.players.findIndex(p => p.id === targetId);
+                const targetPlayer = idx >= 0 ? state.players[idx] : null;
+                if (!targetPlayer || !targetPlayer.isBot) {
+                    return sendAck(callback, false, '指定されたCPUが見つかりません');
+                }
+                const name = targetPlayer.name || 'CPU';
+                state.players.splice(idx, 1);
+                state.chat.push({
+                    sender: 'System',
+                    message: `${name} を退出させました`,
+                    timestamp: Date.now()
+                });
+                updated = true;
             }
             else if (type === 'start_game') {
                 const mode = state.selectedMode || (state.activeTemplate ? state.activeTemplate.mode : 'tabletop');
@@ -1564,24 +1680,31 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
             state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
         }
         else if (type === 'change') {
-            if (mj.deck.length === 0) return sendAck(callback, false, '山札がありません');
+            if (!ensureMixJuiceDeck(mj, 1)) {
+                // 山札＋捨て札＋補充を使っても1枚も用意できない場合は、行動だけスキップしてターンは進める
+                state.chat.push({ sender: 'System', message: `${player.name}: 山札が尽きたためチェンジはスキップされました`, timestamp: Date.now() });
+            } else {
+                let idx = targetIndex;
+                if (typeof idx !== 'number' || !player.hand[idx]) idx = 0;
 
-            let idx = targetIndex;
-            if (typeof idx !== 'number' || !player.hand[idx]) idx = 0;
-
-            if (player.hand[idx]) {
-                const discarded = player.hand.splice(idx, 1)[0];
-                mj.discard.push(discarded);
-                player.hand.push(mj.deck.pop());
-                state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+                if (player.hand[idx]) {
+                    const discarded = player.hand.splice(idx, 1)[0];
+                    mj.discard.push(discarded);
+                    player.hand.push(mj.deck.pop());
+                    state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+                }
             }
         }
         else if (type === 'shuffle_hand') {
-            if (mj.deck.length < 2) return sendAck(callback, false, '山札不足です');
-            while (player.hand.length > 0) mj.discard.push(player.hand.pop());
-            player.hand.push(mj.deck.pop());
-            player.hand.push(mj.deck.pop());
-            state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
+            if (!ensureMixJuiceDeck(mj, 2)) {
+                // どうやっても2枚用意できない場合は、行動だけスキップしてターンを進める
+                state.chat.push({ sender: 'System', message: `${player.name}: 山札が尽きたため冷蔵庫シャッフルはスキップされました`, timestamp: Date.now() });
+            } else {
+                while (player.hand.length > 0) mj.discard.push(player.hand.pop());
+                player.hand.push(mj.deck.pop());
+                player.hand.push(mj.deck.pop());
+                state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
+            }
         }
 
         // 4. ターン進行

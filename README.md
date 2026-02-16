@@ -1,7 +1,7 @@
 # ボードゲーム会場 MVP ガイド
 
 **GitHub 完全再現**: [Sieru626/boardgame-venue](https://github.com/Sieru626/boardgame-venue) と同じ構成です。  
-**重要: ボドゲ会場のローカル = http://localhost:3010（API）。画面は http://localhost:3000 で開きます。**
+**重要: ローカルは http://localhost:3010 のみ使用します。3000 は成立たせ屋本舗で使用するため使用しません。**
 
 - **本番デプロイ（Render）**: [docs/DEPLOY.md](docs/DEPLOY.md) — **main に push するだけ**（Render は初回設定のみ）。
 
@@ -15,8 +15,8 @@
      ```
    - DB 初期化: `cd server` のあと `npx prisma db push`
 2. **`start-all.bat`** をダブルクリックする。
-3. サーバー (Port **3010**) とクライアント (Port **3000**) が立ち上がり、ブラウザで会場が表示されます。
-4. 表示されない場合は手動で **http://localhost:3000** にアクセスしてください。
+3. サーバー (Port **3010**) が立ち上がり、API と画面の両方を **3010** で提供します。ブラウザで **http://localhost:3010** を開いてください。
+4. 表示されない場合は手動で **http://localhost:3010** にアクセスしてください。
 
 ## 使い方
 
@@ -30,11 +30,9 @@
 - **起動しない場合**
   - 開いている黒い画面（コマンドプロンプト）を全て閉じてから、再度 `start-all.bat` を実行してください。
 - **ログ確認**
-  - `BoardGame API` ウィンドウ: バックエンド (3010)
-  - `BoardGame Web` ウィンドウ: フロントエンド (3000)
+  - 「BoardGame Venue」ウィンドウ 1 つで API + Web (3010) が動いています。
 
 ## 開発情報
 
 - ソース: [GitHub - Sieru626/boardgame-venue](https://github.com/Sieru626/boardgame-venue)
-- Client: Next.js (Port **3000**)
-- Server: Express + Socket.io (Port **3010** = ボドゲ会場ローカル)
+- ローカル: **http://localhost:3010 のみ**（API + Next 同一プロセス）。3000 は使用しない（成立たせ屋本舗とポート被り防止）。
