@@ -304,6 +304,33 @@ import PostGameDeckEditor from '../../components/PostGameDeckEditor';
 function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibrary, onOpenEditor, className }: any) {
     const [tab, setTab] = useState('my');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [addBotFeedback, setAddBotFeedback] = useState<string | null>(null);
+
+    const handleAddBot = (level: 'weak' | 'normal') => {
+        if (!socket) {
+            alert('接続されていません');
+            return;
+        }
+        if (!socket.connected) {
+            alert('接続されていません。しばらく待ってから再度お試しください。');
+            return;
+        }
+        if (isProcessing) return;
+        setAddBotFeedback('送信中…');
+        const timeoutId = setTimeout(() => {
+            setAddBotFeedback((prev) => (prev === '送信中…' ? 'サーバーが応答しません。再起動またはデプロイを確認してください。' : prev));
+        }, 5000);
+        socket.emit('add_bot', { roomId, level }, (res: any) => {
+            clearTimeout(timeoutId);
+            setAddBotFeedback(null);
+            if (res?.ok) {
+                setAddBotFeedback('追加しました');
+                setTimeout(() => setAddBotFeedback(null), 2000);
+                return;
+            }
+            alert(res?.error ?? '追加できません');
+        });
+    };
 
     const handleHostAction = (type: string, payload: any = {}, confirmMsg?: string) => {
         if (isProcessing) return;
@@ -368,6 +395,31 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                             </button>
 
                             <button onClick={onOpenLibrary} className="w-full bg-indigo-700 hover:bg-indigo-600 text-white py-3 rounded text-sm font-bold shadow-lg transition mb-4">📚 ゲームライブラリ</button>
+                            {state.phase === 'setup' && (
+                                <div className="mb-4">
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAddBot('weak')}
+                                            disabled={isProcessing}
+                                            className="flex-1 bg-amber-900/50 hover:bg-amber-800 text-amber-200 py-2 rounded text-sm font-bold border border-amber-700 transition disabled:opacity-50"
+                                        >
+                                            🤖 CPU追加 (弱い)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAddBot('normal')}
+                                            disabled={isProcessing}
+                                            className="flex-1 bg-amber-900/50 hover:bg-amber-800 text-amber-200 py-2 rounded text-sm font-bold border border-amber-700 transition disabled:opacity-50"
+                                        >
+                                            🤖 CPU追加 (普通)
+                                        </button>
+                                    </div>
+                                    {addBotFeedback && (
+                                        <div className="mt-2 text-xs text-amber-200/90">{addBotFeedback}</div>
+                                    )}
+                                </div>
+                            )}
                             <button onClick={() => handleHostAction('reset_game', {}, 'ゲームをリセットしますか？')} disabled={isProcessing} className="w-full bg-red-900/50 hover:bg-red-800 text-red-200 py-2 rounded text-sm font-bold border border-red-800 transition">⚠ ゲームリセット</button>
                             <button onClick={() => handleHostAction('shuffle_deck')} disabled={isProcessing} className="w-full mt-2 bg-blue-900/50 hover:bg-blue-800 text-blue-200 py-2 rounded text-sm font-bold border border-blue-800 transition">🔀 山札シャッフル</button>
                         </div>

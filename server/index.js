@@ -459,6 +459,51 @@ async function getActiveGame(roomId) {
     });
 }
 
+// --- MixJuice Bot Logic (Phase 3-1) ---
+function getCardValue(card) {
+    if (card.meta && typeof card.meta.value === 'number') return card.meta.value;
+    const m = (card.name || '').match(/\d+/);
+    return m ? parseInt(m[0], 10) : 0;
+}
+
+function decideMixJuiceActionForBot(state, botPlayer) {
+    const mj = state.mixjuice;
+    if (!mj || !botPlayer || !botPlayer.hand) return { type: 'pass' };
+
+    const hand = botPlayer.hand;
+    const level = botPlayer.cpuLevel || 'weak';
+
+    const sum = hand.reduce((s, c) => s + getCardValue(c), 0);
+    const hasZero = hand.some(c => getCardValue(c) === 0);
+    const canChange = mj.deck.length > 0 && hand.length > 0;
+    const canShuffle = mj.deck.length >= 2;
+
+    if (level === 'weak') {
+        const choices = [{ type: 'pass' }];
+        if (canChange) choices.push({ type: 'change', targetIndex: Math.floor(Math.random() * hand.length) });
+        if (canShuffle) choices.push({ type: 'shuffle_hand' });
+        return choices[Math.floor(Math.random() * choices.length)];
+    }
+
+    if (level === 'normal' || level === 'strong') {
+        if (hasZero && (canChange || canShuffle)) {
+            const zeroIdx = hand.findIndex(c => getCardValue(c) === 0);
+            if (zeroIdx >= 0 && canChange && Math.random() < 0.7) return { type: 'change', targetIndex: zeroIdx };
+            if (canShuffle && Math.random() < 0.5) return { type: 'shuffle_hand' };
+            if (canChange) return { type: 'change', targetIndex: zeroIdx >= 0 ? zeroIdx : 0 };
+        }
+        if (sum >= 7 && !hasZero && Math.random() < 0.7) return { type: 'pass' };
+        if (canChange) {
+            const worstIdx = hand.reduce((best, c, i) => getCardValue(c) < getCardValue(hand[best]) ? i : best, 0);
+            return { type: 'change', targetIndex: worstIdx };
+        }
+        if (canShuffle) return { type: 'shuffle_hand' };
+        return { type: 'pass' };
+    }
+
+    return { type: 'pass' };
+}
+
 // --- Helper: Generate Default Template (Source of Truth Fallback) ---
 function generateDefaultTemplate(mode) {
     if (mode === 'mixjuice') {
@@ -743,6 +788,125 @@ io.on('connection', (socket) => {
         }
     };
 
+    async function runBotTurnForMixJuice(roomCode) {
+        try {
+            const room = await prisma.room.findUnique({ where: { code: roomCode } });
+            if (!room) return;
+            const game = await getActiveGame(room.id);
+            if (!game) return;
+            let state = JSON.parse(game.stateJson);
+            const mj = state.mixjuice;
+            if (state.phase !== 'mixjuice' || !mj || mj.status !== 'playing' || !mj.turnSeat || !mj.turnSeat.length) return;
+            const currentTurnId = mj.turnSeat[mj.turnIndex];
+            const botPlayer = state.players.find(p => p.id === currentTurnId);
+            if (!botPlayer || !botPlayer.isBot) return;
+
+            const action = decideMixJuiceActionForBot(state, botPlayer);
+            const player = botPlayer;
+
+            if (action.type === 'pass') {
+                state.chat.push({ sender: 'System', message: `${player.name}: パス`, timestamp: Date.now() });
+            } else if (action.type === 'change') {
+                if (mj.deck.length > 0 && player.hand[action.targetIndex]) {
+                    const discarded = player.hand.splice(action.targetIndex, 1)[0];
+                    mj.discard.push(discarded);
+                    player.hand.push(mj.deck.pop());
+                    state.chat.push({ sender: 'System', message: `${player.name}: チェンジ`, timestamp: Date.now() });
+                }
+            } else if (action.type === 'shuffle_hand') {
+                if (mj.deck.length >= 2) {
+                    while (player.hand.length > 0) mj.discard.push(player.hand.pop());
+                    player.hand.push(mj.deck.pop());
+                    player.hand.push(mj.deck.pop());
+                    state.chat.push({ sender: 'System', message: `${player.name}: 冷蔵庫シャッフル`, timestamp: Date.now() });
+                }
+            }
+
+            mj.turnCount++;
+            mj.turnIndex = (mj.turnIndex + 1) % mj.turnSeat.length;
+
+            const turnsPerRound = mj.turnSeat.length * 3;
+            if (mj.turnCount >= turnsPerRound) {
+                state.chat.push({ sender: 'System', message: `--- ラウンド ${mj.round} 終了 ---`, timestamp: Date.now() });
+                const activePlayersForRound = state.players.filter(p => !p.isSpectator);
+                const roundResults = [];
+                activePlayersForRound.forEach(p => {
+                    const hasZero = p.hand.some(c => (c.meta?.value === 0 || (c.name || '').includes('0')));
+                    let sum = 0;
+                    if (!hasZero) {
+                        p.hand.forEach(c => {
+                            const val = getCardValue(c);
+                            sum += val;
+                        });
+                    }
+                    roundResults.push({ id: p.id, name: p.name, sum, hasZero });
+                });
+                const candidates = roundResults.filter(r => !r.hasZero && r.sum >= 7).sort((a, b) => b.sum - a.sum);
+                const n = (mj.playerCount || mj.turnSeat.length) || 2;
+                const winSlots = n <= 4 ? 2 : 3;
+                if (candidates.length > 0) {
+                    const groups = {};
+                    candidates.forEach(c => { if (!groups[c.sum]) groups[c.sum] = []; groups[c.sum].push(c); });
+                    const sortedSums = Object.keys(groups).map(Number).sort((a, b) => b - a);
+                    let place = 1, rankNum = 1;
+                    for (const sum of sortedSums) {
+                        if (place > winSlots) break;
+                        const pts = place === 1 ? 2 : (place === 2 ? 1 : (place === 3 && winSlots >= 3 ? 1 : 0));
+                        if (pts > 0) {
+                            groups[sum].forEach(c => { mj.scores[c.id] = (mj.scores[c.id] || 0) + pts; });
+                            state.chat.push({ sender: 'System', message: `${place}位 (+${pts}pt): ${groups[sum].map(c => `${c.name}(${c.sum})`).join(', ')}`, timestamp: Date.now() });
+                        }
+                        place++;
+                    }
+                    rankNum = 1;
+                    mj.lastRoundResult = { round: mj.round, rankings: candidates.map((c, i) => {
+                        const sameRankAsPrev = i > 0 && candidates[i - 1].sum === c.sum;
+                        if (!sameRankAsPrev) rankNum = i + 1;
+                        return { ...c, rank: rankNum, scoreDelta: rankNum === 1 ? 2 : (rankNum === 2 ? 1 : (rankNum === 3 && winSlots >= 3 ? 1 : 0)) };
+                    }) };
+                } else {
+                    state.chat.push({ sender: 'System', message: '勝者なし (全員7未満 or 0ドボン)', timestamp: Date.now() });
+                    mj.lastRoundResult = { round: mj.round, rankings: [] };
+                }
+                mj.round++;
+                if (mj.round > mj.roundMax) {
+                    state.phase = 'finished';
+                    state.chat.push({ sender: 'System', message: 'ゲーム終了！全5ラウンド完了。', timestamp: Date.now() });
+                } else {
+                    mj.turnCount = 0;
+                    mj.turnIndex = 0;
+                    const firstSeat = mj.turnSeat.shift();
+                    mj.turnSeat.push(firstSeat);
+                    activePlayersForRound.forEach(p => { while (p.hand.length > 0) mj.discard.push(p.hand.pop()); });
+                    if (mj.deck.length < activePlayersForRound.length * 2) {
+                        mj.deck = [...mj.deck, ...mj.discard];
+                        mj.discard = [];
+                        for (let i = mj.deck.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [mj.deck[i], mj.deck[j]] = [mj.deck[j], mj.deck[i]];
+                        }
+                    }
+                    activePlayersForRound.forEach(p => {
+                        p.hand.push(mj.deck.pop());
+                        p.hand.push(mj.deck.pop());
+                    });
+                    state.chat.push({ sender: 'System', message: `ラウンド ${mj.round} 開始`, timestamp: Date.now() });
+                }
+            }
+
+            await saveGameState(game.id, state);
+            await broadcastState(room.code, state);
+
+            const nextTurnId = mj.turnSeat[mj.turnIndex];
+            const nextPlayer = state.players.find(p => p.id === nextTurnId);
+            if (nextPlayer && nextPlayer.isBot && state.phase === 'mixjuice' && mj.status === 'playing') {
+                setTimeout(() => runBotTurnForMixJuice(room.code), 2000);
+            }
+        } catch (e) {
+            console.error('[runBotTurnForMixJuice]', e);
+        }
+    }
+
     // --- Old Maid Logic Helpers ---
     const getRank = (name) => {
         if (name === 'Joker') return 'Joker';
@@ -869,6 +1033,48 @@ io.on('connection', (socket) => {
         } catch (e) {
             console.error(e);
             sendAck(callback, false, e.message);
+        }
+    });
+
+    // 2.5 Add Bot (Host only, setup phase)
+    socket.on('add_bot', async (payload, callback) => {
+        console.log('[add_bot] received', { roomId: payload?.roomId, level: payload?.level, hasCallback: typeof callback === 'function' });
+        const cb = typeof callback === 'function' ? callback : () => {};
+        const roomId = payload?.roomId;
+        const level = payload?.level || 'weak';
+        try {
+            const userId = socket.data?.userId;
+            if (!userId) { sendAck(cb, false, '未ログインです'); return; }
+            if (!roomId) { sendAck(cb, false, 'ルームIDがありません'); return; }
+            const room = await prisma.room.findUnique({ where: { code: roomId } });
+            if (!room) { sendAck(cb, false, 'ルームが見つかりません'); return; }
+            if (room.hostUserId !== userId) { sendAck(cb, false, 'ホストのみCPUを追加できます'); return; }
+            const game = await getActiveGame(room.id);
+            if (!game) { sendAck(cb, false, 'Game not found'); return; }
+            let state = JSON.parse(game.stateJson);
+            if (state.phase !== 'setup') { sendAck(cb, false, '準備中のみCPUを追加できます'); return; }
+
+            const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            const levelLabel = level === 'normal' ? '2' : level === 'strong' ? '3' : '1';
+            const name = `CPU (Lv.${levelLabel})`;
+            state.players.push({
+                id: botId,
+                name,
+                hand: [],
+                role: null,
+                isHost: false,
+                status: 'online',
+                isSpectator: false,
+                isBot: true,
+                cpuLevel: level || 'weak'
+            });
+            state.chat.push({ sender: 'System', message: `${name} が参加しました`, timestamp: Date.now() });
+            await saveGameState(game.id, state);
+            await broadcastState(room.code, state);
+            sendAck(cb, true);
+        } catch (e) {
+            console.error('[add_bot]', e);
+            sendAck(cb, false, e.message || 'エラー');
         }
     });
 
@@ -1273,6 +1479,11 @@ io.on('connection', (socket) => {
                 await saveGameState(game.id, state);
                 await broadcastState(room.code, state);
             }
+            if (updated && type === 'start_game' && state.phase === 'mixjuice' && state.mixjuice?.turnSeat?.length) {
+                const firstId = state.mixjuice.turnSeat[0];
+                const firstPlayer = state.players.find(p => p.id === firstId);
+                if (firstPlayer && firstPlayer.isBot) setTimeout(() => runBotTurnForMixJuice(room.code), 2000);
+            }
             sendAck(callback, true);
 
         } catch (e) {
@@ -1478,6 +1689,10 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
         await saveGameState(game.id, state);
         await broadcastState(room.code, state);
         sendAck(callback, true);
+
+        const nextTurnId = mj.turnSeat[mj.turnIndex];
+        const nextPlayer = state.players.find(p => p.id === nextTurnId);
+        if (nextPlayer && nextPlayer.isBot) setTimeout(() => runBotTurnForMixJuice(room.code), 2000);
 
     } catch (e) {
         console.error(e);
