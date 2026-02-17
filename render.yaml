@@ -3,8 +3,8 @@ services:
     name: boardgame-venue-mvp
     env: node
     plan: free
-    # ルートで build.sh を実行して client/server をまとめてビルド
-    buildCommand: bash build.sh
+    # Render 側の Root Directory 設定が server/ でも動くように、一段上に上がってから build.sh を実行
+    buildCommand: cd .. && bash build.sh
     # 本番起動時は server 配下で Prisma 反映 → サーバー起動
     startCommand: cd server && npm run start:render
     envVars:
