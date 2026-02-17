@@ -3,23 +3,16 @@ services:
     name: boardgame-venue-mvp
     env: node
     plan: free
-    # rootDir: server を削除し、ルートでビルド・起動する
+    # ルートで build.sh を実行して client/server をまとめてビルド
     buildCommand: bash build.sh
+    # 本番起動時は server 配下で Prisma 反映 → サーバー起動
     startCommand: cd server && npm run start:render
     envVars:
       - key: NODE_ENV
         value: production
+      # SQLite をそのまま使う（Render 側に DB サービスを作らない）
       - key: DATABASE_URL
-        fromDatabase:
-          name: boardgame-venue-db
-          property: connectionString
-      - key: JWT_SECRET
-        generateValue: true
+        value: file:./prisma/dev.db
+      # クライアントからの接続先（Render の公開 URL）
       - key: NEXT_PUBLIC_SOCKET_URL
         value: https://boardgame-venue-mvp.onrender.com
-
-databases:
-  - name: boardgame-venue-db
-    databaseName: boardgame_venue
-    user: boardgame_user
-    plan: free
