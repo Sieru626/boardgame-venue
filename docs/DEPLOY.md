@@ -1,12 +1,20 @@
 # 本番デプロイ（Render）— Render だけ操作する
 
+**本番URL**: https://boardgame-venue.onrender.com/  
+**引き継ぎ詳細**: [RENDER_引き継ぎ情報.md](RENDER_引き継ぎ情報.md)
+
 ## 普段やること（あなたが触るのはここだけ）
 
 - コードを直したら **GitHub の `main` に push** するだけ。
 - **Render の画面は開かなくてよい。**  
-  → Auto-Deploy がオンなら、push のあと自動でデプロイされる。
+  → Auto-Deploy がオンなら、push のあと自動でデプロイされる（完了まで5〜10分程度）。
 
 「デプロイ」のために押すボタンは **Render にはない**。**Git に push するだけ**で本番が更新されます。
+
+### 反映されない場合
+- Render ダッシュボードで **Auto-Deploy = Yes** を確認
+- **Manual Deploy** → **Deploy latest commit** で手動デプロイ
+- 詳細は [RENDER_引き継ぎ情報.md](RENDER_引き継ぎ情報.md) を参照
 
 ---
 

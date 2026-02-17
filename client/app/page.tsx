@@ -101,7 +101,7 @@ function HomeContent() {
   return (
     <main className="h-screen overflow-y-auto bg-gray-900 text-white p-4 md:p-8">
       <div className="max-w-md mx-auto space-y-8 pb-20">
-        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-amber-400">v8.1 (CPU1/2/3・神経衰弱Bot)</span></h1>
+        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-amber-400">v8.2 (CPU1/2/3・神経衰弱Bot・先攻ランダム)</span></h1>
         <p className="text-center text-gray-500 text-xs">※ http://localhost:3010 で起動してください</p>
 
         <div className="text-center text-sm">
