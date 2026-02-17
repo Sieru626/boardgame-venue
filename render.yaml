@@ -5,7 +5,7 @@ services:
     name: boardgame-venue
     env: node
     rootDir: server
-    buildCommand: cd ../client && npm install && npx next build && cp -r .next-venue ../server/.next && (cp -r public ../server/ 2>/dev/null || true) && cd ../server && npm install && npx prisma generate
+    buildCommand: bash ../build.sh
     startCommand: npm run start:render
     plan: free
     envVars:

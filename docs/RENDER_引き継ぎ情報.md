@@ -18,6 +18,20 @@
 
 ---
 
+## 重要: Render が render.yaml を無視する場合
+
+Render ダッシュボードで **Build Command** が手動設定されていると、render.yaml の buildCommand が**上書き**されます。  
+その場合、以下を Dashboard で設定してください：
+
+**Build Command** を次に変更：
+```
+bash ../build.sh
+```
+
+（リポジトリの `build.sh` が正しい .next-venue コピーを行います）
+
+---
+
 ## デプロイが反映されない場合の確認
 
 ### 1. Render ダッシュボードで確認
