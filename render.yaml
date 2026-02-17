@@ -1,18 +1,25 @@
-# 本番デプロイ: Render ダッシュボードで「Deploy」押すだけ（または main に push で自動デプロイ）
-# 初回のみ: Blueprint でこのリポジトリを追加し、render.yaml を読み込む
 services:
   - type: web
-    name: boardgame-venue
+    name: boardgame-venue-mvp
     env: node
-    rootDir: server
-    buildCommand: bash ../build.sh
-    startCommand: npm run start:render
     plan: free
+    # rootDir: server を削除し、ルートでビルド・起動する
+    buildCommand: bash build.sh
+    startCommand: cd server && npm run start:render
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: file:./prisma/dev.db
-      # 本番URL（サービス名が違う場合は Render ダッシュボードで上書き）
+        fromDatabase:
+          name: boardgame-venue-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
       - key: NEXT_PUBLIC_SOCKET_URL
-        value: https://boardgame-venue.onrender.com
+        value: https://boardgame-venue-mvp.onrender.com
+
+databases:
+  - name: boardgame-venue-db
+    databaseName: boardgame_venue
+    user: boardgame_user
+    plan: free

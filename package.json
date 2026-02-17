@@ -1,0 +1,9 @@
+{
+  "name": "boardgame-venue-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "cd server && npm start",
+    "start:gui": "start start-all.bat"
+  }
+}
