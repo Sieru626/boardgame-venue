@@ -259,7 +259,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
     <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
         {/* 画面が隠れないように、デバッグラベルを小さく右上にバッジ表示 */}
         <div className="absolute top-1 right-1 z-50 text-[10px] font-mono text-red-200 bg-black/70 px-2 py-1 rounded-md opacity-70 pointer-events-none max-w-[220px] truncate">
-            {state.debugVersion || "v6.0 (Old)"}
+            {state.debugVersion || "v8.0"}
         </div>
 
             {/* Background Decor */}
@@ -474,10 +474,12 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
             {/* Old Maid Status Overlays */}
             {isOldMaid && oldMaidData.status === 'finished' && (
                 <div className="absolute inset-0 z-[100] bg-black/80 flex flex-col items-center justify-center animate-in fade-in duration-500 pointer-events-none">
-                    {/* ... (Existing Old Maid Finish UI) ... */}
                     <h1 className="text-6xl font-bold text-yellow-400 mb-8 drop-shadow-lg">🎉 ゲーム終了 🎉</h1>
                     <div className="text-4xl text-white mb-4 animate-pulse">
-                        勝者: <span className="font-bold text-green-400">{state.players.filter((p: any) => p.isOut).map((p: any) => p.name).join(', ') || '全員'}</span>
+                        敗者（ババ）: <span className="font-bold text-red-400">{state.players.filter((p: any) => !p.isOut).map((p: any) => p.name).join(', ') || 'なし'}</span>
+                    </div>
+                    <div className="text-2xl text-gray-300">
+                        あがり: <span className="font-bold text-green-400">{state.players.filter((p: any) => p.isOut).map((p: any) => p.name).join(', ') || 'なし'}</span>
                     </div>
                 </div>
             )}

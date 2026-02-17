@@ -4,7 +4,7 @@
   "description": "Backend for Board Game Venue MVP",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "set PORT=3010 && node index.js",
     "dev": "nodemon index.js",
     "db:push": "npx prisma db push",
     "start:render": "npx prisma db push --accept-data-loss && node index.js"

@@ -92,7 +92,7 @@ export default function RoomPage() {
         // CPU 行動やラウンド結果など、プレイ進行に関係する System メッセージだけ拾う
         const msg: string = last.message || '';
         const isCpuRelated =
-            msg.includes('CPU (Lv.') ||
+            /CPU\d+/.test(msg) ||
             msg.includes('ラウンド') ||
             msg.includes('勝者なし') ||
             msg.includes('位 (+') ||

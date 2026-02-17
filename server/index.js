@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+console.log('--- BoardGame Venue v8.0 (CPU1/2/3 naming) ---');
 console.log('--- SERVER STARTUP ENV CHECK ---');
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('DATABASE_URL exists:', !!process.env.DATABASE_URL);
@@ -22,7 +23,7 @@ const next = require('next');
 // --- Recovery Mode: AI Re-enabled via HTTP ---
 const { GoogleGenAI } = require('@google/genai');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3010;
 const dev = process.env.NODE_ENV !== 'production';
 const skipNext = process.env.SKIP_NEXT === 'true';
 const nextApp = !skipNext ? next({ dev, dir: dev ? path.join(__dirname, '../client') : __dirname }) : null;
@@ -419,6 +420,7 @@ app.delete('/api/games/:id', async (req, res) => {
 function createInitialState(userId, nickname) {
     return {
         version: 0,
+        debugVersion: 'v8.0',
         phase: 'setup',
         selectedMode: 'tabletop', // Default mode
         players: [{
@@ -457,6 +459,15 @@ async function getActiveGame(roomId) {
         where: { roomId },
         orderBy: { createdAt: 'desc' }
     });
+}
+
+function shuffleOrder(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
 }
 
 // --- MixJuice Bot Logic (Phase 3-1) ---
@@ -771,7 +782,7 @@ function initializeStateFromActiveTemplate(state) {
         state.oldMaid = {
             status: 'playing',
             turnIndex: 0,
-            order: activePlayers.map(p => p.id),
+            order: shuffleOrder(activePlayers.map(p => p.id)),
             discardPile: [],
             winners: []
         };
@@ -797,7 +808,7 @@ function initializeStateFromActiveTemplate(state) {
         state.memory = {
             status: 'playing',
             board: cards,
-            turnSeat: activePlayers.map(p => p.id),
+            turnSeat: shuffleOrder(activePlayers.map(p => p.id)),
             turnIndex: 0,
             flips: [],
             scores: activePlayers.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}),
@@ -848,8 +859,46 @@ io.on('connection', (socket) => {
         }
     };
 
+    function migrateOldBotNamesToCpuNumbers(state) {
+        if (!state?.players) return false;
+        let changed = false;
+        const bots = state.players.filter(p => p.isBot);
+        const needsMigration = bots.some(p => !/CPU\d+/.test((p.name || '').trim()));
+        if (needsMigration) {
+            const usedNumbers = bots.map(p => {
+                const m = (p.name || '').match(/CPU(\d+)/);
+                return m ? parseInt(m[1], 10) : 0;
+            });
+            let nextNum = usedNumbers.length > 0 ? Math.max(...usedNumbers) + 1 : 1;
+            bots.forEach(p => {
+                if (/CPU\d+/.test((p.name || '').trim())) return;
+                const level = p.cpuLevel === 'strong' ? '3' : p.cpuLevel === 'normal' ? '2' : '1';
+                p.name = `CPU${nextNum} (Lv.${level})`;
+                nextNum++;
+                changed = true;
+            });
+        }
+        if (state.debugVersion !== 'v8.0') {
+            state.debugVersion = 'v8.0';
+            changed = true;
+        }
+        if (changed) console.log('[migrate] Applied CPU name migration');
+        return changed;
+    }
 
     const broadcastState = async (roomCode, state) => {
+        const migrated = migrateOldBotNamesToCpuNumbers(state);
+        if (migrated) {
+            try {
+                const room = await prisma.room.findUnique({ where: { code: roomCode } });
+                if (room) {
+                    const game = await getActiveGame(room.id);
+                    if (game) {
+                        await saveGameState(game.id, state, 'migrate_bot_names');
+                    }
+                }
+            } catch (e) { console.warn('[migrate_bot_names]', e); }
+        }
         const sockets = await io.in(roomCode).fetchSockets();
         for (const socket of sockets) {
             const uid = socket.data.userId;
@@ -988,6 +1037,99 @@ io.on('connection', (socket) => {
         }
     }
 
+    // --- OldMaid Bot Logic (Phase 3) ---
+    function getNextActivePlayerInOrder(state) {
+        const om = state.oldMaid;
+        if (!om || !om.order) return null;
+        const order = om.order;
+        let i = 1;
+        while (i < order.length) {
+            const nextIdx = (om.turnIndex + i) % order.length;
+            const nextId = order[nextIdx];
+            const nextPlayer = state.players.find(p => p.id === nextId);
+            if (nextPlayer && !nextPlayer.isOut) return { index: nextIdx, id: nextId, player: nextPlayer };
+            i++;
+        }
+        return null;
+    }
+
+    async function runOldMaidBot(roomCode) {
+        try {
+            const room = await prisma.room.findUnique({ where: { code: roomCode } });
+            if (!room) return;
+            const game = await getActiveGame(room.id);
+            if (!game) return;
+            let state = JSON.parse(game.stateJson);
+            const om = state.oldMaid;
+            if (state.phase !== 'oldmaid' || !om || om.status !== 'playing' || !om.order || !om.order.length) return;
+
+            const currentActorId = om.order[om.turnIndex];
+            const botPlayer = state.players.find(p => p.id === currentActorId);
+            if (!botPlayer || !botPlayer.isBot) return;
+
+            const targetInfo = getNextActivePlayerInOrder(state);
+            if (!targetInfo || !targetInfo.player.hand || targetInfo.player.hand.length === 0) return;
+
+            const targetPlayer = targetInfo.player;
+            const pickIndex = Math.floor(Math.random() * targetPlayer.hand.length);
+
+            const drawnCard = targetPlayer.hand.splice(pickIndex, 1)[0];
+            botPlayer.hand.push(drawnCard);
+
+            state.chat.push({
+                sender: 'System',
+                message: `${botPlayer.name} が ${targetPlayer.name} からカードを引きました (残り: ${targetPlayer.hand.length}枚)`,
+                timestamp: Date.now()
+            });
+
+            const oldHand = [...botPlayer.hand];
+            botPlayer.hand = removePairs(botPlayer.hand, om.discardPile);
+            if (botPlayer.hand.length < oldHand.length) {
+                const drawnRank = drawnCard.name === 'Joker' ? 'Joker' : (drawnCard.name || '').split('-')[1];
+                state.chat.push({ sender: 'System', message: `${botPlayer.name} が ${drawnRank} のペアを揃えて捨てました！`, timestamp: Date.now() });
+            }
+
+            const checkOut = (p) => {
+                if (!p.isOut && p.hand.length === 0) {
+                    p.isOut = true;
+                    om.winners.push(p.id);
+                    state.chat.push({ sender: 'System', message: `${p.name} あがり！`, timestamp: Date.now() });
+                    return true;
+                }
+                return false;
+            };
+            checkOut(botPlayer);
+            checkOut(targetPlayer);
+
+            const activeCount = state.players.filter(p => !p.isOut).length;
+            if (activeCount <= 1) {
+                om.status = 'finished';
+                const loser = state.players.find(p => !p.isOut);
+                state.chat.push({ sender: 'System', message: `ゲーム終了！敗者: ${loser ? loser.name : 'なし'}`, timestamp: Date.now() });
+            } else {
+                const nextTurnIndex = om.order.indexOf(targetPlayer.id);
+                if (nextTurnIndex >= 0) {
+                    om.turnIndex = nextTurnIndex;
+                    const newTargetInfo = getNextActivePlayerInOrder(state);
+                    om.targetId = newTargetInfo ? newTargetInfo.id : null;
+                }
+            }
+
+            await saveGameState(game.id, state);
+            await broadcastState(room.code, state);
+
+            if (om.status === 'playing') {
+                const nextActorId = om.order[om.turnIndex];
+                const nextPlayer = state.players.find(p => p.id === nextActorId);
+                if (nextPlayer && nextPlayer.isBot) {
+                    setTimeout(() => runOldMaidBot(room.code), 2000);
+                }
+            }
+        } catch (e) {
+            console.error('[runOldMaidBot]', e);
+        }
+    }
+
     // --- Old Maid Logic Helpers ---
     const getRank = (name) => {
         if (name === 'Joker') return 'Joker';
@@ -1062,6 +1204,7 @@ io.on('connection', (socket) => {
             // Important: Set socket data
             socket.data.userId = userId;
             socket.join(room.code);
+            socket.data.roomCode = room.code;
 
             console.log(`[create_room] Success: ${code}`);
             sendAck(callback, true, { roomId: room.code, gameId: game.id });
@@ -1085,6 +1228,7 @@ io.on('connection', (socket) => {
             // Migration / Reset
             if (!state.chat) state.chat = [];
             if (!state.oldMaid) state.oldMaid = { status: 'idle', discardPile: [] }; // Init OldMaid
+            migrateOldBotNamesToCpuNumbers(state);
 
             // Player logic
             let player = state.players.find(p => p.id === userId);
@@ -1106,6 +1250,7 @@ io.on('connection', (socket) => {
             // Save & Emit
             await saveGameState(game.id, state, 'join', { userId });
             socket.data.userId = userId; // Store ID
+            socket.data.roomCode = room.code;
             socket.join(room.code);
 
             sendAck(callback, true, state);
@@ -1124,11 +1269,16 @@ io.on('connection', (socket) => {
     socket.on('add_bot', async (...args) => {
         const payload = typeof args[0] === 'object' && args[0] !== null ? args[0] : {};
         const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-        const roomId = payload.roomId;
+        let roomId = payload.roomId || payload.roomCode;
+        if (!roomId && socket.data?.roomCode) roomId = socket.data.roomCode;
+        if (!roomId && socket.rooms) {
+            const joinedRooms = Array.from(socket.rooms).filter(r => r !== socket.id);
+            if (joinedRooms.length > 0) roomId = joinedRooms[0];
+        }
         const level = payload.level || 'weak';
         const cb = callback || (() => {});
 
-        console.log('[add_bot] received', { roomId, level, hasCb: !!callback });
+        console.log('[add_bot] received', { roomId: roomId || '(none)', level, hasCb: !!callback });
 
         const done = (ok, err) => {
             try { sendAck(cb, ok, err); } catch (e) { console.error('[add_bot] ack err', e); }
@@ -1150,8 +1300,13 @@ io.on('connection', (socket) => {
             if (existingBots.length >= 5) { done(false, 'CPUは最大5人までです'); return; }
 
             const botId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-            const levelLabel = level === 'normal' ? '2' : level === 'strong' ? '3' : '1';
-            const name = `CPU (Lv.${levelLabel})`;
+            const usedNumbers = existingBots.map(p => {
+                const m = (p.name || '').match(/CPU(\d+)/);
+                return m ? parseInt(m[1], 10) : 0;
+            });
+            const cpuNumber = usedNumbers.length > 0 ? Math.max(...usedNumbers, 0) + 1 : 1;
+            const levelLabel = level === 'strong' ? '3' : level === 'normal' ? '2' : '1';
+            const name = `CPU${cpuNumber} (Lv.${levelLabel})`;
             state.players.push({
                 id: botId,
                 name,
@@ -1164,6 +1319,7 @@ io.on('connection', (socket) => {
                 cpuLevel: level || 'weak'
             });
             state.chat.push({ sender: 'System', message: `${name} が参加しました`, timestamp: Date.now() });
+            console.log('[add_bot] Added:', name, '(cpuLevel:', level, ')');
             await saveGameState(game.id, state);
             await broadcastState(room.code, state);
             done(true);
@@ -1376,11 +1532,11 @@ io.on('connection', (socket) => {
                         pIdx = (pIdx + 1) % activePlayers.length;
                     }
 
-                    // Remove Pairs & Init State
+                    // Remove Pairs & Init State（先攻後攻をランダムに）
                     state.oldMaid = {
                         status: 'playing',
                         turnIndex: 0,
-                        order: activePlayers.map(p => p.id),
+                        order: shuffleOrder(activePlayers.map(p => p.id)),
                         discardPile: [],
                         winners: []
                     };
@@ -1434,11 +1590,11 @@ io.on('connection', (socket) => {
                         [cards[i], cards[j]] = [cards[j], cards[i]];
                     }
 
-                    // 4. Init State
+                    // 4. Init State（先攻後攻をランダムに）
                     state.memory = {
                         status: 'playing',
                         board: cards,
-                        turnSeat: activePlayers.map(p => p.id),
+                        turnSeat: shuffleOrder(activePlayers.map(p => p.id)),
                         turnIndex: 0,
                         flips: [],
                         scores: activePlayers.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}),
@@ -1475,14 +1631,8 @@ io.on('connection', (socket) => {
                         [deck[i], deck[j]] = [deck[j], deck[i]];
                     }
 
-                    // 4. Init State（turnSeat = ババ抜きの order と同様、開始時に1回だけ設定。以後変更しない）
-                    // 先攻が毎回ホスト固定にならないように、ラウンド1開始時に座席順をランダムにローテーションする
-                    const baseOrder = activePlayers.map(p => p.id);
-                    let turnSeat = baseOrder;
-                    if (baseOrder.length > 1) {
-                        const offset = Math.floor(Math.random() * baseOrder.length);
-                        turnSeat = [...baseOrder.slice(offset), ...baseOrder.slice(0, offset)];
-                    }
+                    // 4. Init State（先攻後攻をランダムに）
+                    const turnSeat = shuffleOrder(activePlayers.map(p => p.id));
 
                     state.mixjuice = {
                         status: 'playing',
@@ -1595,10 +1745,20 @@ io.on('connection', (socket) => {
                 await saveGameState(game.id, state);
                 await broadcastState(room.code, state);
             }
-            if (updated && type === 'start_game' && state.phase === 'mixjuice' && state.mixjuice?.turnSeat?.length) {
-                const firstId = state.mixjuice.turnSeat[0];
-                const firstPlayer = state.players.find(p => p.id === firstId);
-                if (firstPlayer && firstPlayer.isBot) setTimeout(() => runBotTurnForMixJuice(room.code), 2000);
+            if (updated && type === 'start_game') {
+                if (state.phase === 'mixjuice' && state.mixjuice?.turnSeat?.length) {
+                    const firstId = state.mixjuice.turnSeat[0];
+                    const firstPlayer = state.players.find(p => p.id === firstId);
+                    if (firstPlayer && firstPlayer.isBot) setTimeout(() => runBotTurnForMixJuice(room.code), 2000);
+                } else if (state.phase === 'oldmaid' && state.oldMaid?.order?.length) {
+                    const firstActorId = state.oldMaid.order[state.oldMaid.turnIndex];
+                    const firstPlayer = state.players.find(p => p.id === firstActorId);
+                    if (firstPlayer && firstPlayer.isBot) setTimeout(() => runOldMaidBot(room.code), 2000);
+                } else if (state.phase === 'playing' && state.memory?.turnSeat?.length && state.selectedMode === 'memory') {
+                    const firstId = state.memory.turnSeat[state.memory.turnIndex];
+                    const firstPlayer = state.players.find(p => p.id === firstId);
+                    if (firstPlayer && firstPlayer.isBot) setTimeout(() => runMemoryBot(room.code), 1500);
+                }
             }
             sendAck(callback, true);
 
@@ -1711,7 +1871,7 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
         mj.turnCount++;
         mj.turnIndex = (mj.turnIndex + 1) % mj.turnSeat.length;
 
-        state.debugVersion = "v7.0 MixJuice turn = OldMaid style (order only, no repair)";
+        state.debugVersion = "v8.0";
 
         // --- Round End Check ---
         const turnsPerRound = mj.turnSeat.length * 3;
@@ -1881,11 +2041,11 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
                 pIdx = (pIdx + 1) % activePlayers.length;
             }
 
-            // Remove Pairs & Init State
+            // Remove Pairs & Init State（先攻後攻をランダムに）
             state.oldMaid = {
                 status: 'playing',
                 turnIndex: 0,
-                order: activePlayers.map(p => p.id), // Only active players in order
+                order: shuffleOrder(activePlayers.map(p => p.id)),
                 discardPile: [],
                 winners: []
             };
@@ -1921,6 +2081,12 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
             await saveGameState(game.id, state);
             await broadcastState(room.code, state);
             sendAck(callback, true);
+
+            const firstActorId = state.oldMaid.order[state.oldMaid.turnIndex];
+            const firstPlayer = state.players.find(p => p.id === firstActorId);
+            if (firstPlayer && firstPlayer.isBot) {
+                setTimeout(() => runOldMaidBot(room.code), 2000);
+            }
 
         } catch (e) {
             console.error(e);
@@ -2233,6 +2399,14 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
             await broadcastState(room.code, state);
             sendAck(callback, true, { drawnCard }); // Return drawn card for preview
 
+            if (state.oldMaid.status === 'playing') {
+                const nextActorId = state.oldMaid.order[state.oldMaid.turnIndex];
+                const nextPlayer = state.players.find(p => p.id === nextActorId);
+                if (nextPlayer && nextPlayer.isBot) {
+                    setTimeout(() => runOldMaidBot(room.code), 2000);
+                }
+            }
+
         } catch (e) {
             console.error(e);
             sendAck(callback, false, e.message);
@@ -2308,105 +2482,174 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
 
     // 7. Memory Game Actions
 
-    socket.on('memory_flip', async ({ roomId, userId, cardId }, callback) => {
-        try {
-            // Fetch Game
-            const room = await prisma.room.findUnique({ where: { code: roomId } });
-            if (!room) return sendAck(callback, false, 'Room not found');
-            const dbGame = await getActiveGame(room.id);
-            if (!dbGame) return sendAck(callback, false, 'Game not found');
+    // --- Memory (神経衰弱) Bot Logic (Phase 3) ---
+    function getRandomUnrevealedCardId(board, excludeIds = []) {
+        const candidates = board.filter(c => !c.faceUp && !c.matched && !excludeIds.includes(c.id));
+        if (candidates.length === 0) return null;
+        return candidates[Math.floor(Math.random() * candidates.length)].id;
+    }
 
+    async function runMemoryBot(roomCode) {
+        try {
+            const room = await prisma.room.findUnique({ where: { code: roomCode } });
+            if (!room) return;
+            const dbGame = await getActiveGame(room.id);
+            if (!dbGame) return;
             let state = JSON.parse(dbGame.stateJson);
             const mem = state.memory;
+            if (state.selectedMode !== 'memory' || !mem || mem.status !== 'playing') return;
+            if (mem.lockUntil > Date.now()) return;
 
-            // Basic Checks
-            if (state.selectedMode !== 'memory') return sendAck(callback, false, 'Not memory mode');
-            if (mem.lockUntil > Date.now()) return sendAck(callback, false, '判定中待機...');
+            const currentPlayerId = mem.turnSeat[mem.turnIndex];
+            const currentPlayer = state.players.find(p => p.id === currentPlayerId);
+            if (!currentPlayer || !currentPlayer.isBot || mem.flips.length >= 2) return;
 
-            // Turn Check
-            const currentTurnPlayer = mem.turnSeat[mem.turnIndex];
-            if (currentTurnPlayer !== userId) return sendAck(callback, false, 'あなたの番ではありません');
+            console.log(`[Memory] Bot Turn: ${currentPlayer.name} (Lv.${currentPlayer.cpuLevel || 'weak'})`);
 
-            // Find Card
-            const card = mem.board.find(c => c.id === cardId);
-            if (!card) return sendAck(callback, false, 'Card not found');
-            if (card.faceUp || card.matched) return sendAck(callback, false, '既にめくられています');
+            // 1.5秒「ため」を作る
+            setTimeout(async () => {
+                const room2 = await prisma.room.findUnique({ where: { code: roomCode } });
+                if (!room2) return;
+                const game2 = await getActiveGame(room2.id);
+                if (!game2) return;
+                let state2 = JSON.parse(game2.stateJson);
+                const mem2 = state2.memory;
+                if (!mem2 || mem2.status !== 'playing' || mem2.turnSeat[mem2.turnIndex] !== currentPlayerId) return;
+                if (mem2.flips.length >= 2) return;
 
-            // Execute Flip
-            card.faceUp = true;
-            mem.flips.push(cardId);
+                const board = mem2.board;
+                let pickCardId = null;
 
-            // Log
-            const player = state.players.find(p => p.id === userId);
-            state.chat.push({
-                sender: 'System',
-                message: `${player?.name || userId} がカードをめくりました`,
-                timestamp: Date.now()
-            });
-
-            // Check Logic
-            let mismatch = false;
-            let matchFound = false;
-
-            if (mem.flips.length === 2) {
-                const c1 = mem.board.find(c => c.id === mem.flips[0]);
-                const c2 = mem.board.find(c => c.id === mem.flips[1]);
-
-                if (c1.rank === c2.rank) {
-                    // Match!
-                    c1.matched = true;
-                    c2.matched = true;
-                    mem.scores[userId] = (mem.scores[userId] || 0) + 1;
-                    mem.flips = [];
-                    matchFound = true;
-
-                    state.chat.push({ sender: 'System', message: `ペア成立！ (Rank: ${c1.rank})`, timestamp: Date.now() });
-
-                    // Win Check
-                    if (mem.board.every(c => c.matched)) {
-                        mem.status = 'finished';
-                        state.chat.push({ sender: 'System', message: '全てのカードが揃いました！ゲーム終了！', timestamp: Date.now() });
-                    }
-                } else {
-                    // Mismatch
-                    mismatch = true;
-                    mem.lockUntil = Date.now() + 1000;
-                }
-            }
-
-            // Save & Emit Immediate State
-            await saveGameState(dbGame.id, state, 'memory_flip', { userId, cardId });
-            io.to(roomId).emit('state_update', state);
-            sendAck(callback, true);
-
-            // Handle Mismatch Async
-            if (mismatch) {
-                setTimeout(async () => {
-                    // Reload state to avoid race conditions? 
-                    // For MVP simplicity we assume simplified concurrency or we re-fetch.
-                    // Re-fetching is safer.
-                    const freshGame = await getActiveGame(room.id);
-                    let freshState = JSON.parse(freshGame.stateJson);
-
-                    // Reset flips
-                    freshState.memory.board.forEach(c => {
-                        if (c.id === mem.flips[0] || c.id === mem.flips[1]) {
-                            c.faceUp = false;
+                // Strong Bot: 約35%の確率で正解を狙う（残りはランダムで人間らしくミスする）
+                const useCheat = currentPlayer.cpuLevel === 'strong' && Math.random() < 0.35;
+                if (useCheat) {
+                    if (mem2.flips.length === 1) {
+                        const firstCardId = mem2.flips[0];
+                        const firstCard = board.find(c => c.id === firstCardId);
+                        if (firstCard) {
+                            const pair = board.find(c => c.id !== firstCardId && !c.faceUp && !c.matched && c.rank === firstCard.rank);
+                            if (pair) pickCardId = pair.id;
                         }
-                    });
-                    freshState.memory.flips = [];
-                    freshState.memory.turnIndex = (freshState.memory.turnIndex + 1) % freshState.memory.turnSeat.length;
-                    freshState.memory.lockUntil = 0;
+                    } else {
+                        const byRank = {};
+                        board.filter(c => !c.faceUp && !c.matched).forEach(c => {
+                            byRank[c.rank] = (byRank[c.rank] || []).concat(c);
+                        });
+                        const pairRanks = Object.keys(byRank).filter(r => byRank[r].length >= 2);
+                        if (pairRanks.length > 0) {
+                            const r = pairRanks[Math.floor(Math.random() * pairRanks.length)];
+                            pickCardId = byRank[r][0].id;
+                        }
+                    }
+                }
 
-                    const nextPlayerId = freshState.memory.turnSeat[freshState.memory.turnIndex];
-                    const nextPlayer = freshState.players.find(p => p.id === nextPlayerId);
-                    freshState.chat.push({ sender: 'System', message: `次は ${nextPlayer?.name} の番です`, timestamp: Date.now() });
+                if (!pickCardId) {
+                    pickCardId = getRandomUnrevealedCardId(board, mem2.flips);
+                }
 
-                    await saveGameState(freshGame.id, freshState, 'memory_mismatch_resolve');
-                    io.to(roomId).emit('state_update', freshState);
-                }, 1000);
+                if (pickCardId) {
+                    await performMemoryFlip(roomCode, currentPlayerId, pickCardId);
+                }
+            }, 1500);
+        } catch (e) {
+            console.error('[runMemoryBot]', e);
+        }
+    }
+
+    async function performMemoryFlip(roomId, userId, cardId) {
+        const room = await prisma.room.findUnique({ where: { code: roomId } });
+        if (!room) return { ok: false, error: 'Room not found' };
+        const dbGame = await getActiveGame(room.id);
+        if (!dbGame) return { ok: false, error: 'Game not found' };
+
+        let state = JSON.parse(dbGame.stateJson);
+        migrateOldBotNamesToCpuNumbers(state);
+        const mem = state.memory;
+        if (!mem) return { ok: false, error: 'Not memory mode' };
+        if (state.selectedMode !== 'memory') return { ok: false, error: 'Not memory mode' };
+        if (mem.lockUntil > Date.now()) return { ok: false, error: '判定中待機...' };
+
+        const currentTurnPlayer = mem.turnSeat[mem.turnIndex];
+        if (currentTurnPlayer !== userId) return { ok: false, error: 'あなたの番ではありません' };
+
+        const card = mem.board.find(c => c.id === cardId);
+        if (!card) return { ok: false, error: 'Card not found' };
+        if (card.faceUp || card.matched) return { ok: false, error: '既にめくられています' };
+
+        card.faceUp = true;
+        mem.flips.push(cardId);
+
+        const player = state.players.find(p => p.id === userId);
+        state.chat.push({
+            sender: 'System',
+            message: `${player?.name || userId} がカードをめくりました`,
+            timestamp: Date.now()
+        });
+
+        let mismatch = false;
+
+        if (mem.flips.length === 2) {
+            const c1 = mem.board.find(c => c.id === mem.flips[0]);
+            const c2 = mem.board.find(c => c.id === mem.flips[1]);
+
+            if (c1.rank === c2.rank) {
+                c1.matched = true;
+                c2.matched = true;
+                mem.scores[userId] = (mem.scores[userId] || 0) + 1;
+                mem.flips = [];
+                state.chat.push({ sender: 'System', message: `ペア成立！ (Rank: ${c1.rank})`, timestamp: Date.now() });
+
+                if (mem.board.every(c => c.matched)) {
+                    mem.status = 'finished';
+                    state.chat.push({ sender: 'System', message: '全てのカードが揃いました！ゲーム終了！', timestamp: Date.now() });
+                }
+            } else {
+                mismatch = true;
+                mem.lockUntil = Date.now() + 1000;
             }
+        }
 
+        await saveGameState(dbGame.id, state, 'memory_flip', { userId, cardId });
+        await broadcastState(roomId, state);
+
+        const currentPlayer = state.players.find(p => p.id === userId);
+
+        if (mismatch) {
+            const flipIds = [mem.flips[0], mem.flips[1]];
+            setTimeout(async () => {
+                const freshGame = await getActiveGame(room.id);
+                let freshState = JSON.parse(freshGame.stateJson);
+                migrateOldBotNamesToCpuNumbers(freshState);
+
+                freshState.memory.board.forEach(c => {
+                    if (c.id === flipIds[0] || c.id === flipIds[1]) c.faceUp = false;
+                });
+                freshState.memory.flips = [];
+                freshState.memory.turnIndex = (freshState.memory.turnIndex + 1) % freshState.memory.turnSeat.length;
+                freshState.memory.lockUntil = 0;
+
+                const nextPlayerId = freshState.memory.turnSeat[freshState.memory.turnIndex];
+                const nextPlayer = freshState.players.find(p => p.id === nextPlayerId);
+                freshState.chat.push({ sender: 'System', message: `次は ${nextPlayer?.name} の番です`, timestamp: Date.now() });
+
+                await saveGameState(freshGame.id, freshState, 'memory_mismatch_resolve');
+                await broadcastState(roomId, freshState);
+
+                if (nextPlayer && nextPlayer.isBot && freshState.memory.status === 'playing') {
+                    setTimeout(() => runMemoryBot(roomId), 1500);
+                }
+            }, 1000);
+        } else if (mem.status === 'playing' && currentPlayer && currentPlayer.isBot) {
+            setTimeout(() => runMemoryBot(roomId), 1500);
+        }
+
+        return { ok: true };
+    }
+
+    socket.on('memory_flip', async ({ roomId, userId, cardId }, callback) => {
+        try {
+            const result = await performMemoryFlip(roomId, userId, cardId);
+            sendAck(callback, result.ok, result.error);
         } catch (e) {
             console.error(e);
             sendAck(callback, false, e.message);
@@ -2674,14 +2917,14 @@ if (!skipNext && nextApp) {
         // Next.js Catch-All
         app.all('*', (req, res) => handle(req, res));
 
-        server.listen(PORT, () => {
-            console.log(`Recovery Server running on port ${PORT}`);
+        server.listen(PORT, '0.0.0.0', () => {
+            console.log(`Server running on http://localhost:${PORT} (and 0.0.0.0:${PORT})`);
         });
     });
 } else {
     // Standalone API Mode
     app.get('/', (req, res) => res.send('BoardGame Venue API Server (Next.js Skipped)'));
-    server.listen(PORT, () => {
-        console.log(`API Server running on port ${PORT} (Next.js Skipped)`);
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`API Server running on http://localhost:${PORT} (Next.js Skipped)`);
     });
 }

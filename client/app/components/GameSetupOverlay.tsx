@@ -41,6 +41,8 @@ export default function GameSetupOverlay({
     // Map internal mode id to display name
     const getModeName = (m: string) => {
         if (m === 'oldmaid') return 'ババ抜き (Old Maid)';
+        if (m === 'memory') return '神経衰弱 (Memory)';
+        if (m === 'mixjuice') return 'ミックスジュース (MixJuice)';
         return '通常 (Tabletop)';
     };
 
