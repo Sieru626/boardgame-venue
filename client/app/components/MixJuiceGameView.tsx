@@ -113,7 +113,7 @@ export default function MixJuiceGameView({ roomId, userId, state, socket, onEnte
                     <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-left">
                         {players.filter((p: any) => !p.isSpectator).map((p: any) => (
                             <React.Fragment key={p.id}>
-                                <div className={`font-bold ${p.id === userId ? 'text-blue-300' : 'text-gray-400'}`}>{p.name}</div>
+                                <div className={`font-bold ${p.id === userId ? 'text-blue-300' : 'text-gray-400'}`}>{String(p?.name ?? '')}</div>
                                 <div className="text-right font-mono text-yellow-200">{mjData.scores[p.id] || 0} pt</div>
                             </React.Fragment>
                         ))}

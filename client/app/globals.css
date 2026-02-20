@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-dotgothic: var(--font-dotgothic), ui-sans-serif, system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -82,4 +83,9 @@ body {
   min-width: 0 !important;
   width: 100%;
   overflow-x: hidden;
+}
+
+/* DotGothic16 font utility */
+.font-dotgothic {
+  font-family: var(--font-dotgothic), ui-sans-serif, system-ui, sans-serif;
 }

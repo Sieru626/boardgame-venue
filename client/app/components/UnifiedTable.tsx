@@ -259,7 +259,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
     <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
         {/* 画面が隠れないように、デバッグラベルを小さく右上にバッジ表示 */}
         <div className="absolute top-1 right-1 z-50 text-[10px] font-mono text-red-200 bg-black/70 px-2 py-1 rounded-md opacity-70 pointer-events-none max-w-[220px] truncate">
-            {state.debugVersion || "v8.0"}
+            {String(state?.debugVersion ?? 'v8.0')}
         </div>
 
             {/* Background Decor */}
@@ -272,8 +272,8 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                         <div className={`text-xs font-bold tracking-[0.5em] mb-2 ${revealPopup.type === 'scene' ? 'text-yellow-500' : 'text-red-500'}`}>
                             {revealPopup.type === 'scene' ? 'SCENE UPDATE' : 'NEW LAW'}
                         </div>
-                        <div className="text-4xl font-black text-white mb-2 whitespace-nowrap">{revealPopup.title}</div>
-                        <div className="text-sm text-gray-300 max-w-md mx-auto">{revealPopup.text}</div>
+                        <div className="text-4xl font-black text-white mb-2 whitespace-nowrap">{String(revealPopup?.title ?? '')}</div>
+                        <div className="text-sm text-gray-300 max-w-md mx-auto">{String(revealPopup?.text ?? '')}</div>
                     </div>
                 </div>
             )}
@@ -341,11 +341,11 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                 </div>
                                 {freeTalk.currentScene ? (
                                     <div className="animate-in fade-in">
-                                        <div className="text-yellow-400 font-bold text-lg leading-tight truncate">{freeTalk.currentScene.name}</div>
+                                        <div className="text-yellow-400 font-bold text-lg leading-tight truncate">{String(freeTalk.currentScene?.name ?? '')}</div>
 
                                         {expandHeader && (
                                             <div className="mt-2 text-left bg-black/20 p-2 rounded">
-                                                <div className="text-xs text-gray-300 whitespace-pre-wrap mb-2">{freeTalk.currentScene.text}</div>
+                                                <div className="text-xs text-gray-300 whitespace-pre-wrap mb-2">{String(freeTalk.currentScene?.text ?? '')}</div>
                                                 {/* Role List Table */}
                                                 <div className="border-t border-gray-600 pt-1">
                                                     <div className="text-[10px] text-gray-500 font-bold mb-1">ROLE LIST</div>
@@ -359,10 +359,10 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                                                     const def: any = customDefs[key] || FALLBACK_ROLE_DEFINITIONS[key];
                                                                     if (!def) return null;
                                                                     return (
-                                                                        <tr key={key} className={myPlayer?.role === key ? 'text-yellow-400 font-bold bg-white/10' : ''}>
+                                                                        <tr key={key} className={(typeof myPlayer?.role === 'string' ? myPlayer.role : String((myPlayer?.role as any)?.roleLetter ?? (myPlayer?.role as any)?.name ?? '')) === key ? 'text-yellow-400 font-bold bg-white/10' : ''}>
                                                                             <td className="w-4 font-black p-0.5">{key}</td>
-                                                                            <td className="w-14 p-0.5 whitespace-nowrap">{def.name}</td>
-                                                                            <td className="opacity-75 p-0.5 leading-tight">{def.description}</td>
+                                                                            <td className="w-14 p-0.5 whitespace-nowrap">{String(def?.name ?? '')}</td>
+                                                                            <td className="opacity-75 p-0.5 leading-tight">{String(def?.description ?? '')}</td>
                                                                         </tr>
                                                                     );
                                                                 });
@@ -400,8 +400,8 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                 </div>
                                 {freeTalk.currentLaw ? (
                                     <div className="animate-in fade-in">
-                                        <div className="text-red-400 font-bold text-lg leading-tight truncate">{freeTalk.currentLaw.name}</div>
-                                        {expandHeader && <div className="text-xs text-gray-300 mt-2 text-left bg-black/20 p-2 rounded whitespace-pre-wrap">{freeTalk.currentLaw.text}</div>}
+                                        <div className="text-red-400 font-bold text-lg leading-tight truncate">{String(freeTalk.currentLaw?.name ?? '')}</div>
+                                        {expandHeader && <div className="text-xs text-gray-300 mt-2 text-left bg-black/20 p-2 rounded whitespace-pre-wrap">{String(freeTalk.currentLaw?.text ?? '')}</div>}
                                     </div>
                                 ) : (
                                     <div className="text-gray-600 italic text-sm py-1">待機中...</div>
@@ -466,7 +466,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                             <div className="absolute inset-0 bg-white blur-xl opacity-30 animate-pulse" />
                             <Card card={pulledCard} className="w-48 h-64 shadow-[0_0_50px_rgba(255,255,255,0.3)] scale-100" />
                         </div>
-                        <div className="mt-4 text-2xl font-bold text-yellow-400 drop-shadow-md">{pulledCard.name.includes('Joker') ? 'JOKER!' : 'カード入手!'}</div>
+                        <div className="mt-4 text-2xl font-bold text-yellow-400 drop-shadow-md">{String(pulledCard?.name ?? '').includes('Joker') ? 'JOKER!' : 'カード入手!'}</div>
                     </div>
                 </div>
             )}
@@ -476,10 +476,10 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                 <div className="absolute inset-0 z-[100] bg-black/80 flex flex-col items-center justify-center animate-in fade-in duration-500 pointer-events-none">
                     <h1 className="text-6xl font-bold text-yellow-400 mb-8 drop-shadow-lg">🎉 ゲーム終了 🎉</h1>
                     <div className="text-4xl text-white mb-4 animate-pulse">
-                        敗者（ババ）: <span className="font-bold text-red-400">{state.players.filter((p: any) => !p.isOut).map((p: any) => p.name).join(', ') || 'なし'}</span>
+                        敗者（ババ）: <span className="font-bold text-red-400">{state.players.filter((p: any) => !p.isOut).map((p: any) => String(p?.name ?? '')).join(', ') || 'なし'}</span>
                     </div>
                     <div className="text-2xl text-gray-300">
-                        あがり: <span className="font-bold text-green-400">{state.players.filter((p: any) => p.isOut).map((p: any) => p.name).join(', ') || 'なし'}</span>
+                        あがり: <span className="font-bold text-green-400">{state.players.filter((p: any) => p.isOut).map((p: any) => String(p?.name ?? '')).join(', ') || 'なし'}</span>
                     </div>
                 </div>
             )}
@@ -544,7 +544,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                             <div className="absolute -top-16 bg-black/60 px-4 py-1 rounded-full backdrop-blur-sm border border-white/10 text-center whitespace-nowrap">
                                 <span className="text-gray-300 text-sm">手番: </span>
                                 <span className="text-yellow-400 font-bold text-lg">
-                                    {state.players.find((p: any) => p.id === oldMaidData.order[oldMaidData.turnIndex])?.name || 'Unknown'}
+                                    {String(state.players.find((p: any) => p.id === oldMaidData.order[oldMaidData.turnIndex])?.name ?? 'Unknown')}
                                 </span>
                             </div>
                         )}
@@ -577,7 +577,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                 {/* Free Play Objects */}
                 {state.table.map((obj: any, i: number) => (
                     <div key={obj.id || i} className="absolute transition-all duration-300 hover:z-50" style={{ left: `calc(50% + ${obj.x}px)`, top: `calc(50% + ${obj.y}px)` }}>
-                        <div className="absolute -top-4 w-full text-center text-[10px] text-gray-400 font-bold bg-black/50 rounded px-1 whitespace-nowrap overflow-hidden">{obj.ownerName}</div>
+                        <div className="absolute -top-4 w-full text-center text-[10px] text-gray-400 font-bold bg-black/50 rounded px-1 whitespace-nowrap overflow-hidden">{String(obj?.ownerName ?? '')}</div>
                         <Card card={obj.card} />
                     </div>
                 ))}
@@ -598,15 +598,15 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                 ${isTurn ? 'bg-yellow-700 border-yellow-400 animate-pulse scale-110 z-20' : 'bg-gray-800 border-gray-600'}
                                 ${isTarget && canPick ? 'ring-4 ring-blue-500 ring-offset-2 ring-offset-[#2a2d36]' : ''}
                             `}>
-                                {p.name}
+                                {String((p as any).name ?? '')}
                                 {isWinner && <span className="ml-1 text-green-400">👑</span>}
                                 {p.isOut && <span className="ml-1 text-red-600 font-black">🚫</span>}
                                 {canPick && <div className="absolute -right-12 top-0 bg-blue-600 text-white text-[10px] font-bold px-1 rounded animate-bounce">TARGET</div>}
 
                                 {/* Opponent Role Badge */}
-                                {isFreeTalk && p.role && (
+                                {isFreeTalk && p.role != null && (
                                     <div className="absolute -top-3 -right-3 bg-gray-900 text-yellow-500 text-xs w-6 h-6 flex items-center justify-center rounded-full border border-yellow-600 shadow-md font-black z-30 ring-2 ring-black/50">
-                                        {p.role}
+                                        {typeof p.role === 'string' ? p.role : String((p.role as any)?.roleLetter ?? (p.role as any)?.name ?? '')}
                                     </div>
                                 )}
                             </div>
@@ -634,7 +634,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                             {/* Phase 3: Floating Text */}
                             {floatingTexts[p.id]?.map(ft => (
                                 <div key={ft.id} className="absolute -top-8 left-1/2 -translate-x-1/2 text-yellow-300 font-black text-2xl animate-out fade-out slide-out-to-top-10 duration-1000 pointer-events-none drop-shadow-md whitespace-nowrap z-50">
-                                    {ft.text}
+                                    {String(ft?.text ?? '')}
                                 </div>
                             ))}
 
@@ -745,26 +745,25 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                         {/* Phase 3: Role Display (My Letter) */}
                         {/* Phase 3: Role Display (My Letter) - Adjusted Position */}
                         {/* Phase 3: Role Display (My Letter) - Adjusted Position */}
-                        {isFreeTalk && myPlayer?.role && (
+                                {isFreeTalk && myPlayer?.role != null && (
                             <div className="absolute bottom-52 left-4 pointer-events-auto z-50">
                                 <div className="flex flex-col items-center">
                                     <div className="text-yellow-500 font-bold uppercase tracking-widest text-xs mb-1 shadow-black drop-shadow-md">YOUR ROLE</div>
                                     <div className="bg-gray-800 border-4 border-yellow-600 rounded-xl flex flex-col items-center justify-center shadow-2xl transform rotate-[-5deg] p-4 min-w-[120px] transition-transform hover:scale-110 hover:rotate-0">
                                         <div className="flex items-baseline gap-2 border-b border-gray-600 pb-2 mb-2 w-full justify-center">
-                                            <span className="text-6xl font-black text-white drop-shadow-md">{myPlayer.role}</span>
+                                            <span className="text-6xl font-black text-white drop-shadow-md">{typeof myPlayer.role === 'string' ? myPlayer.role : String((myPlayer.role as any)?.roleLetter ?? (myPlayer.role as any)?.name ?? '')}</span>
                                         </div>
                                         <span className="text-xl font-bold text-yellow-400 text-center leading-tight">
                                             {(() => {
+                                                const roleKey = typeof myPlayer.role === 'string' ? myPlayer.role : String((myPlayer.role as any)?.roleLetter ?? (myPlayer.role as any)?.name ?? '');
                                                 const FALLBACK_ROLE_DEFINITIONS: any = {
                                                     'A': { name: '将軍' }, 'B': { name: '参謀長' }, 'C': { name: '情報将校' }, 'D': { name: '検閲官' },
                                                     'E': { name: '兵站将校' }, 'F': { name: '宣伝将校' }, 'G': { name: '外交官' }, 'H': { name: '民間代表' }
                                                 };
-                                                // Robust Lookup: Check custom first, then fallback
                                                 const customDefs = freeTalk.currentScene?.meta?.roleDefinitions || freeTalk.currentScene?.roleDefinitions;
-                                                const custom = customDefs?.[myPlayer.role];
-                                                if (custom && custom.name) return custom.name;
-
-                                                return FALLBACK_ROLE_DEFINITIONS[myPlayer.role]?.name || 'Unknown';
+                                                const custom = customDefs?.[roleKey];
+                                                if (custom && typeof custom.name === 'string') return custom.name;
+                                                return FALLBACK_ROLE_DEFINITIONS[roleKey]?.name || 'Unknown';
                                             })()}
                                         </span>
                                     </div>
@@ -787,15 +786,18 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                                     'G': { name: '外交官', description: '対外交渉。外部との関係を考慮。' },
                                     'H': { name: '民間代表', description: '現場の声。市民の感情を代弁。' }
                                 };
-                                // Prep Virtual Role Card
-                                const roleCard = (isFreeTalk && myPlayer?.role) ? {
+                                // Prep Virtual Role Card (role may be string or object - ensure string for display)
+                                const roleKeyStr = (isFreeTalk && myPlayer?.role != null)
+                                    ? (typeof myPlayer.role === 'string' ? myPlayer.role : String((myPlayer.role as any)?.roleLetter ?? (myPlayer.role as any)?.name ?? ''))
+                                    : '';
+                                const roleCard = roleKeyStr ? {
                                     type: 'role',
-                                    roleLetter: myPlayer.role,
+                                    roleLetter: roleKeyStr,
                                     roleName: (() => {
                                         const customDefs = freeTalk.currentScene?.meta?.roleDefinitions || freeTalk.currentScene?.roleDefinitions;
-                                        const custom = customDefs?.[myPlayer.role];
-                                        if (custom && custom.name) return custom.name;
-                                        return FALLBACK_ROLE_DEFINITIONS[myPlayer.role]?.name || 'Unknown';
+                                        const custom = customDefs?.[roleKeyStr];
+                                        if (custom && typeof custom.name === 'string') return custom.name;
+                                        return FALLBACK_ROLE_DEFINITIONS[roleKeyStr]?.name || 'Unknown';
                                     })(),
                                     name: 'Role Card' // for key/safety
                                 } : null;

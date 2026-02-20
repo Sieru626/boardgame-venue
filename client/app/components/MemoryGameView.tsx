@@ -45,7 +45,7 @@ export default function MemoryGameView({ state, players, myId, isSpectator, onFl
                             <span className="text-red-400 font-bold animate-pulse">GAME OVER</span>
                         ) : (
                             isMyTurn ? <span className="text-green-400 font-bold text-xl">あなたの番です！</span>
-                                : <span className="text-white">{currentTurnPlayer?.name} の番です</span>
+                                : <span className="text-white">{String(currentTurnPlayer?.name ?? '')} の番です</span>
                         )}
                     </div>
                 </div>
@@ -57,7 +57,7 @@ export default function MemoryGameView({ state, players, myId, isSpectator, onFl
                         const isCurrent = p!.id === currentTurnPlayerId;
                         return (
                             <div key={p!.id} className={`flex flex-col items-center p-2 rounded ${isCurrent ? 'bg-yellow-600/50 border border-yellow-400' : 'bg-gray-800'}`}>
-                                <span className="font-bold text-sm">{p!.name}</span>
+                                <span className="font-bold text-sm">{String(p!.name ?? '')}</span>
                                 <span className="text-2xl font-mono">{score}</span>
                             </div>
                         );

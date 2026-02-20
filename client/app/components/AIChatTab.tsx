@@ -80,7 +80,7 @@ export default function AIChatTab({ socket, roomId, gmChat }: AIChatTabProps) {
                                 ? 'bg-purple-900/40 border border-purple-800 text-purple-100'
                                 : 'bg-gray-800 text-gray-400'
                             }`}>
-                            {c.text}
+                            {String(c?.text ?? '')}
                         </div>
                     </div>
                 ))}

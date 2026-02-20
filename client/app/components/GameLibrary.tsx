@@ -2,12 +2,22 @@
 
 import { useState, useEffect } from 'react';
 
+/** Prisma DateTime や ISO 文字列・数値を受け取り、JSX 用の文字列に変換する。オブジェクトを直接レンダリングしないよう必ず文字列を返す。 */
+function formatDateTime(value: unknown): string {
+    if (value == null) return '';
+    if (value instanceof Date) return value.toLocaleString();
+    if (typeof value === 'number' || typeof value === 'string') return new Date(value).toLocaleString();
+    // React 要素やその他のオブジェクトは JSX に渡さない（"Objects are not valid as a React child" 防止）
+    if (typeof value === 'object') return '';
+    return String(value);
+}
+
 type GameTemplate = {
     id: string;
     title: string;
     mode: string;
     revision: number;
-    updatedAt: string;
+    updatedAt: string | number | Date; // API/Prisma で string または Date が渡る場合あり
     rulesText?: string;
     deckJson?: string;
 };
@@ -149,9 +159,9 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
                                 {games.map(t => (
                                     <div key={t.id} className="bg-gray-700 p-3 rounded">
                                         <div>
-                                            <div className="font-bold text-lg">{t.title}</div>
+                                            <div className="font-bold text-lg">{String(t?.title ?? '')}</div>
                                             <div className="text-xs text-gray-400">
-                                                モード: {t.mode} | Rev: {t.revision} | {new Date(t.updatedAt).toLocaleString()}
+                                                モード: {String(t?.mode ?? '')} | Rev: {String(t?.revision ?? '')} | {formatDateTime(t?.updatedAt)}
                                             </div>
                                         </div>
                                         <div className="flex gap-2 mt-4 justify-end">
@@ -329,8 +339,8 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
                                 {/* Mock Preview based on client-side logic mimicking server */}
                                 {previewCards.map((card: any, i: number) => (
                                     <div key={i} className="bg-blue-900/30 border border-blue-500/30 p-2 rounded">
-                                        <div className="font-bold text-blue-300 text-sm">{card.title}</div>
-                                        <div className="text-xs text-gray-300 whitespace-pre-wrap">{card.text}</div>
+                                        <div className="font-bold text-blue-300 text-sm">{String(card?.title ?? '')}</div>
+                                        <div className="text-xs text-gray-300 whitespace-pre-wrap">{String(card?.text ?? '')}</div>
                                     </div>
                                 ))}
                             </div>

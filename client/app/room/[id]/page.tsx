@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { use, useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import UnifiedTable from '../../components/UnifiedTable';
@@ -8,6 +8,7 @@ import DeckEditor from '../../components/DeckEditor';
 import GameLibrary from '../../components/GameLibrary';
 import Card from '../../components/Card';
 import RuleBook from '../../components/RuleBook';
+import PostGameDeckEditor from '../../components/PostGameDeckEditor';
 
 // Types
 type Player = { id: string; name: string; hand: any[]; role: any; isHost: boolean; status: string };
@@ -21,10 +22,14 @@ interface GameState {
     oldMaid?: any; // Phase 5 extension
 }
 
-export default function RoomPage() {
-    const params = useParams();
+type RoomPageProps = { params?: Promise<{ id: string }> };
+
+export default function RoomPage(props: RoomPageProps) {
     const router = useRouter();
-    const roomId = params.id as string;
+    const paramsFromHook = useParams();
+    const paramsPromise = props.params ?? Promise.resolve({ id: paramsFromHook?.id ?? '' });
+    const resolved = use(paramsPromise) as { id?: string };
+    const roomId = typeof resolved?.id === 'string' ? resolved.id : String(resolved?.id ?? '');
     const [socket, setSocket] = useState<Socket | null>(null);
     const [state, setState] = useState<GameState | null>(null);
     const [userId, setUserId] = useState<string>('');
@@ -34,15 +39,19 @@ export default function RoomPage() {
     const [showPostGameEditor, setShowPostGameEditor] = useState(false);
     const [activeTab, setActiveTab] = useState<'board' | 'log' | 'status'>('board');
     const [botActionBanner, setBotActionBanner] = useState<string | null>(null);
+    const [reconnecting, setReconnecting] = useState(false);
+    const [reconnectedToast, setReconnectedToast] = useState(false);
+    const hadStateBeforeRef = useRef(false);
 
     // Layout Refs
     const logEndRef = useRef<HTMLDivElement>(null);
     const lastActionTime = useRef(0);
     const lastBotMessageTime = useRef(0);
     const botBannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const reconnectedToastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isChatSending, setIsChatSending] = useState(false);
 
-    // Initial Connection
+    // Initial Connection & サーバー再起動後の再接続
     useEffect(() => {
         const storedName = localStorage.getItem('nickname');
         if (!storedName) { router.push('/'); return; }
@@ -52,30 +61,67 @@ export default function RoomPage() {
         if (!uid) { uid = crypto.randomUUID(); localStorage.setItem('userId', uid); }
         setUserId(uid);
 
-        // Connect to relative path in production, or specific URL in dev if set
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
         const socketInstance = socketUrl
-            ? io(socketUrl, { transports: ["websocket", "polling"], withCredentials: true })
-            : io({ transports: ["websocket", "polling"], withCredentials: true });
+            ? io(socketUrl, {
+                transports: ["websocket", "polling"],
+                withCredentials: true,
+                reconnection: true,
+                reconnectionAttempts: 30,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+            })
+            : io({
+                transports: ["websocket", "polling"],
+                withCredentials: true,
+                reconnection: true,
+                reconnectionAttempts: 30,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+            });
         setSocket(socketInstance);
 
-        socketInstance.on('connect', () => {
-            console.log('Socket Connected');
+        const doJoinRoom = () => {
             socketInstance.emit('join_room', { roomId, nickname: storedName, userId: uid }, (res: any) => {
                 if (res.error || res.ok === false) {
                     alert(res.error || 'Join failed');
                     router.push('/');
                 } else {
-                    setState(res.data || res.state || res); // Fallbacks just in case
+                    const newState = res.data || res.state || res;
+                    setState(newState);
+                    const wasReconnect = hadStateBeforeRef.current;
+                    hadStateBeforeRef.current = true; // 一度でも入室できたら true
+                    setReconnecting(false);
+                    if (wasReconnect) {
+                        setReconnectedToast(true);
+                        if (reconnectedToastRef.current) clearTimeout(reconnectedToastRef.current);
+                        reconnectedToastRef.current = setTimeout(() => {
+                            setReconnectedToast(false);
+                            reconnectedToastRef.current = null;
+                        }, 3000);
+                    }
                 }
             });
+        };
+
+        socketInstance.on('connect', () => {
+            console.log('Socket Connected');
+            doJoinRoom();
+        });
+
+        socketInstance.on('disconnect', (_reason: string) => {
+            console.log('Socket Disconnected');
+            setReconnecting(true);
         });
 
         socketInstance.on('state_update', (newState: GameState) => {
             setState(newState);
         });
 
-        return () => { socketInstance.disconnect(); };
+        return () => {
+            if (reconnectedToastRef.current) clearTimeout(reconnectedToastRef.current);
+            socketInstance.disconnect();
+        };
     }, [roomId, router]);
 
     // Auto-scroll log
@@ -156,18 +202,37 @@ export default function RoomPage() {
         });
     };
 
-    if (!state) return <div className="h-screen bg-black text-white flex items-center justify-center">Loading...</div>;
+    if (!state) {
+        return (
+            <div className="h-screen bg-black text-white flex flex-col items-center justify-center gap-4">
+                <div>Loading...</div>
+                {reconnecting && <div className="text-amber-400 text-sm animate-pulse">サーバーに再接続中…</div>}
+            </div>
+        );
+    }
 
     const myPlayer = state.players.find(p => p.id === userId);
     const isHost = myPlayer?.isHost ?? false;
 
     return (
-        <div className="h-screen w-screen bg-gray-950 text-gray-200 flex flex-col overflow-hidden font-sans">
+        <div className="h-screen w-screen bg-gray-950 text-gray-200 flex flex-col overflow-hidden font-sans relative">
+            {/* 再接続中バナー */}
+            {reconnecting && (
+                <div className="absolute top-0 left-0 right-0 z-[100] bg-amber-900/95 text-amber-100 py-2 text-center text-sm font-bold shadow-lg">
+                    接続が切れました。サーバー再起動後は自動で再接続し、入り直します…
+                </div>
+            )}
+            {/* 再接続完了トースト */}
+            {reconnectedToast && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[101] bg-green-700 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg animate-in fade-in duration-200">
+                    再接続しました
+                </div>
+            )}
             {/* Header - Desktop Only */}
             <header className="hidden md:flex h-12 bg-gray-900 border-b border-gray-800 items-center justify-between px-4 shrink-0">
                 <div className="flex items-center gap-4">
                     <span className="font-bold text-blue-400">BoardGame Venue</span>
-                    <span className="text-gray-500 text-xs">部屋番号: {roomId}</span>
+                    <span className="text-gray-500 text-xs">部屋番号: {String(roomId ?? '')}</span>
                     <button
                         className="ml-2 px-2 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 rounded text-xs border border-blue-800 transition flex items-center gap-1"
                         onClick={() => {
@@ -203,18 +268,18 @@ export default function RoomPage() {
                                 title={isHost ? 'クリックして権限変更 (観戦/プレイヤー)' : ''}
                             >
                                 {(p as any).isSpectator && <span className="text-[10px] bg-black/50 px-1 rounded">👁</span>}
-                                {p.name}
+                                {String((p as any).name ?? '')}
                             </button>
                         ))}
                     </div>
-                    {myPlayer && <span className="text-blue-300 font-bold">{myPlayer.name}</span>}
+                    {myPlayer && <span className="text-blue-300 font-bold">{String(myPlayer.name ?? '')}</span>}
                 </div>
             </header>
 
             {/* Header - Mobile Only (Simplified) */}
             <header className="md:hidden h-10 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-3 shrink-0">
                 <span className="font-bold text-blue-400 text-sm">BG Venue</span>
-                <span className="text-gray-500 text-[10px]">{roomId}</span>
+                <span className="text-gray-500 text-[10px]">{String(roomId ?? '')}</span>
             </header>
 
             {/* Main Area */}
@@ -225,8 +290,8 @@ export default function RoomPage() {
                     <div className="flex-1 overflow-y-auto p-2 text-sm space-y-2 font-mono">
                         {(state.chat || []).map((c: any, i: number) => (
                             <div key={i} className={`p-2 rounded ${c.sender === 'System' ? 'bg-gray-800 text-gray-400' : 'bg-gray-800/50'}`}>
-                                {c.sender !== 'System' && <span className="text-blue-400 font-bold mr-2">{c.sender}:</span>}
-                                <span className={c.sender === 'System' ? 'text-xs' : ''}>{c.message}</span>
+                                {c.sender !== 'System' && <span className="text-blue-400 font-bold mr-2">{String(c.sender ?? '')}:</span>}
+                                <span className={c.sender === 'System' ? 'text-xs' : ''}>{String(c.message ?? '')}</span>
                             </div>
                         ))}
                         <div ref={logEndRef}></div>
@@ -246,7 +311,7 @@ export default function RoomPage() {
                         <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30">
                             <div className="bg-black/80 text-amber-200 border border-amber-400/60 rounded-full px-4 py-1 text-xs shadow-lg flex items-center gap-2">
                                 <span className="text-sm">🤖</span>
-                                <span>{botActionBanner}</span>
+                                <span>{String(botActionBanner ?? '')}</span>
                             </div>
                         </div>
                     )}
@@ -329,12 +394,6 @@ export default function RoomPage() {
         </div>
     );
 }
-
-import PostGameDeckEditor from '../../components/PostGameDeckEditor';
-
-// ... (existing helper function RightPane)
-
-// ... (existing helper function RightPane)
 
 function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibrary, onOpenEditor, className }: any) {
     const [tab, setTab] = useState('my');
@@ -429,9 +488,11 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                         <div>
                             <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">役職</h3>
                             <div className="bg-gray-800 p-4 rounded border border-gray-700 min-h-[120px] flex flex-col items-center justify-center gap-2">
-                                {myPlayer?.role ? (
+                                {myPlayer?.role != null && myPlayer.role !== '' ? (
                                     <>
-                                        <span className="font-black text-6xl text-white drop-shadow-lg">{myPlayer.role}</span>
+                                        <span className="font-black text-6xl text-white drop-shadow-lg">
+                                            {typeof myPlayer.role === 'string' ? myPlayer.role : String((myPlayer.role as any)?.roleLetter ?? (myPlayer.role as any)?.name ?? '')}
+                                        </span>
                                         <span className="text-xl font-bold text-yellow-400 text-center border-t border-gray-600 pt-1 w-full">
                                             {(() => {
                                                 const freeTalk = state.freeTalk || {};
@@ -440,7 +501,9 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                                                     'E': { name: '兵站将校' }, 'F': { name: '宣伝将校' }, 'G': { name: '外交官' }, 'H': { name: '民間代表' }
                                                 };
                                                 const defs = freeTalk.currentScene?.meta?.roleDefinitions || freeTalk.currentScene?.roleDefinitions || FALLBACK_ROLE_DEFINITIONS;
-                                                return (defs[myPlayer.role]?.name || 'Unknown');
+                                                const roleKey = typeof myPlayer.role === 'string' ? myPlayer.role : (myPlayer.role as any)?.roleLetter ?? (myPlayer.role as any)?.name ?? '';
+                                                const nameVal = defs[roleKey]?.name;
+                                                return typeof nameVal === 'string' ? nameVal : (nameVal != null ? String(nameVal) : 'Unknown');
                                             })()}
                                         </span>
                                     </>
@@ -452,7 +515,7 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                     </div>
                 )}
                 {tab === 'rules' && (
-                    <RuleBook rules={state.rules} />
+                    <RuleBook rules={state.rules ?? { text: '', summary: '', cards: [] }} />
                 )}
                 {/* Host Tab Simplified */}
                 {tab === 'host' && isHost && (
@@ -494,7 +557,7 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                                         </button>
                                     </div>
                                     {addBotFeedback && (
-                                        <div className="mt-2 text-xs text-amber-200/90">{addBotFeedback}</div>
+                                        <div className="mt-2 text-xs text-amber-200/90">{String(addBotFeedback ?? '')}</div>
                                     )}
                                     {addBotSupported === false && (
                                         <div className="mt-2 text-xs text-red-300 bg-red-900/30 p-2 rounded">
@@ -512,7 +575,7 @@ function RightPane({ state, myPlayer, socket, roomId, isHost, userId, onOpenLibr
                                 <div className="flex flex-wrap gap-2">
                                     {state.players.filter((p: any) => p.isBot).map((p: any) => (
                                         <div key={p.id} className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-full px-3 py-1 text-xs text-gray-100">
-                                            <span>{p.name}</span>
+                                            <span>{String((p as any).name ?? '')}</span>
                                             <button
                                                 type="button"
                                                 onClick={() => handleHostAction('remove_bot', { targetUserId: p.id })}

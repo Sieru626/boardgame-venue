@@ -44,7 +44,7 @@ const getTrumpVisuals = (name: string) => {
 };
 
 export default function Card({ card, isFaceDown, onClick, className = '', style }: CardProps) {
-    const cardName = typeof card === 'string' ? card : card.name;
+    const cardName = typeof card === 'string' ? card : String((card as any)?.name ?? '');
     const effectiveFaceDown = isFaceDown || cardName === 'Back';
     const isRoleCard = typeof card === 'object' && card.type === 'role';
     const trump = !effectiveFaceDown && !isRoleCard ? getTrumpVisuals(cardName) : null;
@@ -63,9 +63,9 @@ export default function Card({ card, isFaceDown, onClick, className = '', style 
                 style={style}
             >
                 <div className="text-[10px] font-bold uppercase tracking-widest opacity-80">YOUR ROLE</div>
-                <div className="text-5xl font-black text-white drop-shadow-md">{(card as any).roleLetter || (card as any).meta?.roleLetter}</div>
+                <div className="text-5xl font-black text-white drop-shadow-md">{String((card as any).roleLetter ?? (card as any).meta?.roleLetter ?? '')}</div>
                 <div className="text-sm font-bold bg-white/10 px-2 py-0.5 rounded w-full text-center whitespace-nowrap overflow-hidden text-ellipsis">
-                    {(card as any).roleName || (card as any).meta?.roleName}
+                    {String((card as any).roleName ?? (card as any).meta?.roleName ?? '')}
                 </div>
             </div>
         );
@@ -167,7 +167,7 @@ export default function Card({ card, isFaceDown, onClick, className = '', style 
             ) : (
                 // Generic Text Design
                 <div className="p-1 text-center break-words text-xs font-bold text-gray-800 leading-tight">
-                    {cardName}
+                    {String(cardName)}
                 </div>
             )}
         </motion.div>

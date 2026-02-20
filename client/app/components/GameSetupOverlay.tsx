@@ -50,8 +50,8 @@ export default function GameSetupOverlay({
 
     return (
         <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center animate-in fade-in p-8">
-            <h1 className="text-4xl font-bold text-green-400 mb-2 border-b-2 border-green-600 pb-2">{title}</h1>
-            <div className="text-xl text-gray-300 mb-8 font-bold">現在のモード: <span className="text-yellow-400">{modeName}</span></div>
+            <h1 className="text-4xl font-bold text-green-400 mb-2 border-b-2 border-green-600 pb-2">{String(title ?? '')}</h1>
+            <div className="text-xl text-gray-300 mb-8 font-bold">現在のモード: <span className="text-yellow-400">{String(modeName ?? '')}</span></div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8 w-full max-w-4xl">
                 {players.map(p => {
@@ -68,7 +68,7 @@ export default function GameSetupOverlay({
                             <div className="flex items-center gap-2">
                                 <span className="text-2xl">{isSpectator ? '👁' : '👤'}</span>
                                 <div>
-                                    <div className="font-bold text-lg">{p.name} {isMe && '(あなた)'}</div>
+                                    <div className="font-bold text-lg">{String((p as any).name ?? '')} {isMe && '(あなた)'}</div>
                                     <div className="text-xs opacity-70">{isSpectator ? '観戦モード' : 'プレイヤー'}</div>
                                 </div>
                             </div>
@@ -103,7 +103,7 @@ export default function GameSetupOverlay({
             <div className="flex flex-col gap-6 items-center w-full max-w-md">
                 <div className="flex gap-4 items-center justify-center">
                     <div className="text-gray-400 text-sm">
-                        プレイヤー: <span className="text-white font-bold text-xl">{playerCount}</span> 人
+                        プレイヤー: <span className="text-white font-bold text-xl">{String(playerCount ?? 0)}</span> 人
                     </div>
                     {isHost && (
                         <button

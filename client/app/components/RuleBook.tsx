@@ -53,7 +53,7 @@ export default function RuleBook({ rules }: Props) {
                 onClick={() => setExpandedId(isExpanded ? null : card.id)}
             >
                 <div className="flex justify-between items-start">
-                    <div className="font-bold text-sm text-blue-200">{card.title}</div>
+                    <div className="font-bold text-sm text-blue-200">{String(card?.title ?? '')}</div>
                     <button
                         onClick={(e) => togglePin(card.id, e)}
                         className={`text-xs px-1 rounded ${isPinned ? 'text-yellow-400' : 'text-gray-600 hover:text-gray-400'}`}
@@ -64,9 +64,9 @@ export default function RuleBook({ rules }: Props) {
                 {/* Always show first line or summary if collapsed? For now show full if short, truncated if long? */}
                 {/* Let's show full text but it might be long. */}
                 <div className={`mt-2 text-xs text-gray-300 leading-relaxed whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-3'}`}>
-                    {card.text}
+                    {String(card?.text ?? '')}
                 </div>
-                {!isExpanded && card.text.length > 50 && (
+                {!isExpanded && String(card?.text ?? '').length > 50 && (
                     <div className="text-[10px] text-gray-500 mt-1 text-center">▼ 詳細を見る</div>
                 )}
             </div>
@@ -117,10 +117,10 @@ export default function RuleBook({ rules }: Props) {
                 </div>
 
                 {/* Fallback to old text rules if no cards */}
-                {cards.length === 0 && rules.text && (
+                {cards.length === 0 && rules?.text && (
                     <div className="bg-gray-800 p-4 rounded border border-gray-700 mt-4">
                         <div className="text-xs text-gray-400 mb-2">テキストルール</div>
-                        <div className="text-sm text-gray-300 whitespace-pre-wrap">{rules.text}</div>
+                        <div className="text-sm text-gray-300 whitespace-pre-wrap">{String(rules.text ?? '')}</div>
                     </div>
                 )}
                 {cards.length === 0 && !rules.text && (

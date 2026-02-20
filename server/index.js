@@ -50,6 +50,9 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// 疎通確認用（Next 未起動でも応答）
+app.get('/api/health', (req, res) => res.json({ ok: true, message: 'BoardGame Venue API' }));
 // app.use(express.static('public')); 
 
 // Connection Logging
@@ -2912,19 +2915,31 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
     socket.on('disconnect', () => { });
 });
 
+function startListening(useNext = false) {
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server running on http://localhost:${PORT} (and http://0.0.0.0:${PORT})`);
+        if (useNext) console.log('Next.js クライアント: http://localhost:' + PORT);
+        console.log('疎通確認: http://localhost:' + PORT + '/api/health');
+    }).on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} は使用中です。別プロセスを終了するか、環境変数 PORT を変更してください。`);
+        } else {
+            console.error('Listen error:', err);
+        }
+        process.exit(1);
+    });
+}
+
 if (!skipNext && nextApp) {
     nextApp.prepare().then(() => {
-        // Next.js Catch-All
         app.all('*', (req, res) => handle(req, res));
-
-        server.listen(PORT, '0.0.0.0', () => {
-            console.log(`Server running on http://localhost:${PORT} (and 0.0.0.0:${PORT})`);
-        });
+        startListening(true);
+    }).catch((err) => {
+        console.error('Next.js prepare に失敗しました。API のみで起動します。', err.message || err);
+        app.get('/', (req, res) => res.send('BoardGame Venue API (Next.js 未読み込み)。クライアントは別途 npm run dev で起動してください。'));
+        startListening(false);
     });
 } else {
-    // Standalone API Mode
     app.get('/', (req, res) => res.send('BoardGame Venue API Server (Next.js Skipped)'));
-    server.listen(PORT, '0.0.0.0', () => {
-        console.log(`API Server running on http://localhost:${PORT} (Next.js Skipped)`);
-    });
+    startListening(false);
 }

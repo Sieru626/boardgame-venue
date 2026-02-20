@@ -1,56 +1,65 @@
 @echo off
+chcp 65001 >nul
 cd /d %~dp0
 
-echo Starting Board Game Venue MVP (Port 3010 only - 3000 is used by 成立たせ屋本舗)
+echo ============================================
+echo   Board Game Venue 起動 (Port 3010)
+echo ============================================
+echo.
+
+if not exist "server\.env" (
+    echo [注意] server\.env がありません。
+    echo 先に setup.bat を実行してください。
+    echo.
+    pause
+    exit /b 1
+)
 
 if not exist "server\node_modules" (
-    echo Installing Server Dependencies...
+    echo 依存関係をインストール中...
     cd server
     call npm install
     cd ..
 )
 
 if not exist "client\node_modules" (
-    echo Installing Client Dependencies...
     cd client
     call npm install
     cd ..
 )
 
-echo Starting Server (API + Web on Port 3010)...
-start "BoardGame Venue" cmd /k "cd /d %~dp0server && npm start"
+echo サーバーを起動中...
+start "BoardGame Venue" cmd /k "cd /d %~dp0server && set PORT=3010 && node index.js"
 
-echo Waiting for Server to be ready (Port 3010)...
+echo 起動を待っています (最大90秒)...
 set /a retries=0
 
-:CHECK_SERVER
+:CHECK
 set /a retries+=1
-if %retries% geq 50 (
+if %retries% geq 30 (
     echo.
-    echo [ERROR] Timeout: Server did not start within 150 seconds.
-    echo Please check the server console window for errors.
-    pause
-    exit /b 1
+    echo [INFO] タイムアウト: 手動で http://localhost:3010/demo を開いてください
+    goto OPEN
 )
 
 timeout /t 3 >nul
-netstat -ano | findstr ":3010" | findstr "LISTENING" >nul
+netstat -ano 2>nul | findstr ":3010" | findstr "LISTENING" >nul
 if %errorlevel% neq 0 (
-    echo ... Waiting for Server ^(3010^) [Attempt %retries%/50] ...
-    goto CHECK_SERVER
+    echo ... 待機中 [%retries%/30]
+    goto CHECK
 )
 
+:OPEN
 echo.
-echo ===================================================
-echo   Server is UP! Waiting for Next.js to be ready...
-echo ===================================================
-timeout /t 15
+echo ブラウザを開きます...
+timeout /t 2 >nul
+start "" "http://localhost:3010/demo"
 
 echo.
-echo Opening Game [http://localhost:3010]
-start http://localhost:3010
-
-echo.
-echo Done! Use only http://localhost:3010 (do not use 3000).
-echo To stop, close the "BoardGame Venue" window.
+echo ============================================
+echo   デモ: http://localhost:3010/demo
+echo   デモのみ見る: open-demo.bat
+echo   停止: BoardGame Venue ウィンドウを閉じる
+echo   サーバー再起動: restart-server.bat (再起動後はルームで自動再接続)
+echo ============================================
 pause

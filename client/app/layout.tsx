@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, DotGothic16 } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,9 +12,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const dotGothic = DotGothic16({
+  weight: "400",
+  subsets: ["latin", "latin-ext"],
+  variable: "--font-dotgothic",
+});
+
 export const metadata: Metadata = {
-  title: "BoardGame Venue",
-  description: "Play board games online",
+  title: "New Game Order | ボードゲームの試運転会場",
+  description: "ボードゲームの試運転会場 - オンラインでボードゲームを楽しもう",
 };
 
 export const viewport: Viewport = {
@@ -32,7 +38,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${dotGothic.variable} font-dotgothic antialiased`}
       >
         {children}
       </body>

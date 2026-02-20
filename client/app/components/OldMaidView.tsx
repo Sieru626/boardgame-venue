@@ -136,7 +136,7 @@ export default function OldMaidView({ socket, roomId, userId, state }: Props) {
                                 {/* Player Label */}
                                 <div className="font-bold text-center mb-4 w-full border-b border-white/10 pb-2">
                                     <div className="text-white text-xl flex items-center justify-center gap-2">
-                                        {p.name} {isMe && <span className="text-xs bg-blue-600 px-1 rounded text-white">YOU</span>}
+                                        {String(p?.name ?? '')} {isMe && <span className="text-xs bg-blue-600 px-1 rounded text-white">YOU</span>}
                                     </div>
                                     {isWinner && <div className="text-green-400 text-sm font-bold uppercase mt-1">勝ち抜け 👑</div>}
                                     {isLoser && <div className="text-red-400 text-sm font-bold uppercase mt-1">敗者 💀</div>}

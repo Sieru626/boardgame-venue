@@ -4,6 +4,7 @@ node_modules/
 
 # next
 client/.next/
+client/.next-venue/
 client/out/
 client/.vercel/
 
@@ -29,3 +30,4 @@ Thumbs.db
 server/prisma/*.db
 server/prisma/*.db.*
 server/prisma/dev.db*
+server/prisma/prisma/

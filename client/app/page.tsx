@@ -11,6 +11,7 @@ function HomeContent() {
   const inviteCode = searchParams.get('room');
 
   const [nickname, setNickname] = useState('');
+  const [roomCode, setRoomCode] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
@@ -20,6 +21,7 @@ function HomeContent() {
   useEffect(() => {
     const stored = localStorage.getItem('nickname');
     if (stored) setNickname(stored);
+    if (inviteCode) setRoomCode(inviteCode);
 
     const timeoutId = setTimeout(() => {
       if (loading) setConnectionError(true);
@@ -27,12 +29,11 @@ function HomeContent() {
 
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     const socketInstance = socketUrl
-      ? io(socketUrl, { transports: ["websocket", "polling"], withCredentials: true })
-      : io({ transports: ["websocket", "polling"], withCredentials: true });
+      ? io(socketUrl, { transports: ['websocket', 'polling'], withCredentials: true })
+      : io({ transports: ['websocket', 'polling'], withCredentials: true });
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
-      console.log('Connected to backend');
       setLoading(false);
       setConnectionError(false);
       setIsConnected(true);
@@ -47,7 +48,7 @@ function HomeContent() {
       socketInstance.disconnect();
       clearTimeout(timeoutId);
     };
-  }, []);
+  }, [inviteCode, loading]);
 
   const handleCreateRoom = () => {
     if (!nickname) {
@@ -79,18 +80,20 @@ function HomeContent() {
       if (res?.ok && res?.data?.roomId) {
         router.push(`/room/${res.data.roomId}`);
       } else {
-        alert("作成に失敗しました:\n" + (res?.error || '不明なエラー'));
+        alert('作成に失敗しました:\n' + (res?.error || '不明なエラー'));
       }
     });
   };
 
   const handleJoinRoom = () => {
-    const code = inviteCode || prompt("ルームコードを入力してください");
+    const code = inviteCode || roomCode.trim();
     if (code && nickname) {
       localStorage.setItem('nickname', nickname);
       router.push(`/room/${code}`);
     } else if (!nickname) {
       alert('ニックネームを入力してください');
+    } else if (!code) {
+      alert('部屋コードを入力してください');
     }
   };
 
@@ -99,79 +102,151 @@ function HomeContent() {
   const canCreateRoom = isConnected && socket && !creating;
 
   return (
-    <main className="h-screen overflow-y-auto bg-gray-900 text-white p-4 md:p-8">
-      <div className="max-w-md mx-auto space-y-8 pb-20">
-        <h1 className="text-4xl font-bold text-center text-blue-400">ボドゲテスト会場 <span className="text-sm text-amber-400">v8.2 (CPU1/2/3・神経衰弱Bot・先攻ランダム)</span></h1>
-        <p className="text-center text-gray-500 text-xs">※ http://localhost:3010 で起動してください</p>
+    <main className="min-h-screen bg-black text-white font-dotgothic flex flex-col items-center justify-center p-4 overflow-hidden">
+      {/* CRT風スキャンライン効果 */}
+      <div className="fixed inset-0 pointer-events-none z-0 opacity-[0.03]" aria-hidden="true">
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.35) 2px, rgba(0,0,0,0.35) 4px)',
+          }}
+        />
+      </div>
 
-        <div className="text-center text-sm">
-          {connectionError ? (
-            <div className="bg-red-900/50 border border-red-500 rounded p-4 text-left">
-              <div className="font-bold text-red-300 mb-2">⚠ サーバーに接続できません</div>
-              <ul className="list-disc list-inside text-xs text-gray-300 mb-4 space-y-1">
-                <li>サーバーが起動していない可能性があります</li>
-                <li>Nodeの黒い画面(Server)が開いているか確認してください</li>
-                <li>もしダメなら <code>STOP-ALL.cmd</code> → <code>start-all.bat</code> を試してください</li>
-              </ul>
-              <button onClick={reloadPage} className="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-2 rounded">
-                再読み込み (Retry)
-              </button>
-            </div>
-          ) : (
-            <>サーバー状態: {loading ? <span className="text-yellow-500">接続中...</span> : <span className="text-green-500">オンライン</span>}</>
-          )}
-        </div>
+      <div className="relative z-10 w-full max-w-3xl flex flex-col items-center">
+        {/* ロゴ */}
+        <header className="text-center mb-2">
+          <h1 className="text-3xl md:text-4xl font-bold text-[#FFD700] drop-shadow-[0_0_16px_rgba(255,215,0,0.7)] tracking-[0.2em]">
+            NEW GAME ORDER
+          </h1>
+          <p className="text-xs md:text-sm text-white/80 mt-1 tracking-[0.3em]">
+            // BOARD GAME VENUE //
+          </p>
+        </header>
 
-        {inviteCode && (
-          <div className="bg-blue-900/50 border border-blue-500 p-4 rounded-lg text-center animate-pulse">
-            <div className="text-sm text-blue-300 font-bold uppercase">招待されています</div>
-            <div className="text-2xl font-mono font-bold text-white mt-1">{inviteCode}</div>
+        {/* サーバー状態・エラー（コンパクト表示） */}
+        {connectionError ? (
+          <div className="mb-2 w-full max-w-md bg-red-950/80 border border-red-500 rounded px-3 py-2 text-[11px] leading-snug">
+            <div className="font-bold text-red-300 mb-1">⚠ サーバーに接続できません</div>
+            <p className="text-gray-200">
+              サーバーが起動しているか確認し、ダメな場合は STOP-ALL.cmd → start-all.bat を試してください。
+            </p>
+            <button
+              onClick={reloadPage}
+              className="mt-2 w-full bg-red-700 hover:bg-red-600 text-white font-bold py-1.5 rounded text-xs"
+            >
+              再読み込み (Retry)
+            </button>
+          </div>
+        ) : (
+          <div className="mb-1 text-[11px] text-white/60 tracking-[0.2em]">
+            サーバー状態：
+            {loading ? <span className="text-amber-400">接続中...</span> : <span className="text-emerald-400">● ONLINE</span>}
           </div>
         )}
 
-        <div className="bg-gray-800 p-6 rounded-lg space-y-4">
-          <label className="block text-sm font-medium">ニックネーム</label>
-          <input
-            type="text"
-            className="w-full bg-gray-700 h-12 px-3 rounded text-white text-lg"
-            placeholder="ニックネームを入力..."
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-          />
-        </div>
+        {/* 招待コードバナー */}
+        {inviteCode && (
+          <div className="mb-2 px-3 py-2 bg-amber-950/70 border border-amber-500 rounded text-center text-xs tracking-[0.2em]">
+            <div className="text-amber-300 font-bold">INVITED ROOM</div>
+            <div className="mt-1 text-lg font-mono text-[#FFD700]">{typeof inviteCode === 'string' ? inviteCode : ''}</div>
+          </div>
+        )}
 
-        <div className="grid gap-6">
-          {!inviteCode && (
-            <div className="bg-gray-800 p-6 rounded-lg border-2 border-transparent hover:border-blue-500 transition">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-400">
-                <span className="text-2xl">👑</span> ホストとして始める
-              </h2>
-              <p className="text-gray-400 text-sm mb-4">新しいルームを作成し、ゲームの設定を行います。</p>
-              <button
-                onClick={handleCreateRoom}
-                disabled={!canCreateRoom}
-                className="w-full h-14 rounded font-bold text-lg transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700 enabled:hover:bg-blue-700"
-              >
-                {creating ? '作成中...' : !isConnected ? '接続中です。しばらくお待ちください' : 'ルームを新規作成'}
-              </button>
+        {/* ディーラー + 吹き出し + パネル一体構造（demo と同一デザイン） */}
+        <div className="relative w-full mt-2">
+          {/* ディーラーと吹き出し */}
+          <div className="relative w-full flex flex-col items-center mb-[-32px] z-10">
+            <img
+              src="/dealer.png"
+              alt="Dealer"
+              className="w-64 h-64 object-contain relative z-10"
+              style={{ imageRendering: 'pixelated' }}
+            />
+            <div className="relative mt-[-60px] z-20 bg-[#1a1a1a] border-4 border-gray-200 p-4 min-w-[280px] md:min-w-[340px] text-center rounded-sm shadow-[0_0_0_4px_#000,inset_0_0_0_2px_#000]">
+              <p className="text-base md:text-lg leading-relaxed text-white">
+                ようこそ。新しいゲームの秩序へ。<br />
+                準備はいい？
+              </p>
+              <div className="absolute bottom-2 right-2 w-0 h-0 border-l-[6px] border-l-transparent border-t-[8px] border-t-white border-r-[6px] border-r-transparent animate-bounce" aria-hidden="true" />
             </div>
-          )}
+          </div>
 
-          <div className={`bg-gray-800 p-6 rounded-lg border-2 border-transparent hover:border-green-500 transition ${inviteCode ? 'border-green-500 ring-2 ring-green-500/50' : ''}`}>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-green-400">
-              <span className="text-2xl">👋</span> {inviteCode ? '招待に参加する' : 'ゲストとして参加'}
-            </h2>
-            <p className="text-gray-400 text-sm mb-2">{inviteCode ? 'ニックネームを入力して参加してください。' : 'ルームコードを入力して参加します。'}</p>
-            {!inviteCode && <p className="text-gray-500 text-xs mb-4">※ ルームコードはホストから共有されます</p>}
+          {/* テーブル兼コントロールパネル */}
+          <div className="relative w-full border-4 border-yellow-700/90 rounded-2xl bg-gray-900/95 pt-10 pb-4 px-3 md:px-6 shadow-[0_0_32px_rgba(0,0,0,0.9)]">
+            <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* 左：ホスト */}
+              <div className="border-4 border-emerald-500 border-double rounded-xl bg-black/80 px-3 py-3 flex flex-col gap-2 shadow-[0_0_18px_rgba(16,185,129,0.45)]">
+                <div className="flex items-center gap-2 text-emerald-300 text-xs md:text-sm font-bold tracking-[0.25em]">
+                  <span className="text-xl md:text-2xl">👑</span>
+                  <span>ホスト</span>
+                </div>
+                <p className="text-[11px] md:text-xs text-emerald-100/80 tracking-wide">
+                  ホスト
+                </p>
+                <div className="mt-1 flex flex-col gap-1.5">
+                  <span className="text-[11px] text-emerald-200/90 tracking-[0.18em]">ニックネーム</span>
+                  <div className="relative h-8 md:h-9 bg-black border-2 border-emerald-500/70 rounded-sm flex items-center px-2 text-xs md:text-sm">
+                    <input
+                      type="text"
+                      value={typeof nickname === 'string' ? nickname : ''}
+                      onChange={(e) => setNickname(e.target.value)}
+                      placeholder="NAME"
+                      className="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleCreateRoom}
+                    disabled={!canCreateRoom}
+                    className="mt-2 h-9 md:h-10 rounded-sm bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold text-xs md:text-sm tracking-[0.25em] shadow-[0_0_14px_rgba(16,185,129,0.6)]"
+                  >
+                    {creating
+                      ? 'CREATING...'
+                      : !isConnected
+                        ? 'CONNECTING...'
+                        : '部屋を作る'}
+                  </button>
+                </div>
+              </div>
 
-            <button
-              onClick={handleJoinRoom}
-              className="w-full bg-green-600 hover:bg-green-700 h-14 rounded font-bold text-lg transition flex items-center justify-center"
-            >
-              {inviteCode ? '▶ 参加する' : 'ルームコードを入力'}
-            </button>
+              {/* 右：ゲスト */}
+              <div className="border-4 border-yellow-500 border-double rounded-xl bg-black/80 px-3 py-3 flex flex-col gap-2 shadow-[0_0_18px_rgba(245,158,11,0.5)]">
+                <div className="flex items-center gap-2 text-yellow-300 text-xs md:text-sm font-bold tracking-[0.25em]">
+                  <span className="text-xl md:text-2xl">🔑</span>
+                  <span>ゲスト</span>
+                </div>
+                <p className="text-[11px] md:text-xs text-yellow-100/80 tracking-wide">
+                  ゲスト
+                </p>
+                <div className="mt-1 flex flex-col gap-1.5">
+                  <span className="text-[11px] text-yellow-200/90 tracking-[0.18em]">部屋コード</span>
+                  <div className="relative h-8 md:h-9 bg-black border-2 border-yellow-500/70 rounded-sm flex items-center px-2 text-xs md:text-sm">
+                    <input
+                      type="text"
+                      value={typeof roomCode === 'string' ? roomCode : ''}
+                      onChange={(e) => setRoomCode(e.target.value)}
+                      placeholder={typeof inviteCode === 'string' && inviteCode ? inviteCode : 'ROOM CODE'}
+                      readOnly={!!inviteCode}
+                      className="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleJoinRoom}
+                    className="mt-2 h-9 md:h-10 rounded-sm bg-[#FFD700] hover:bg-amber-300 text-black font-bold text-xs md:text-sm tracking-[0.25em] shadow-[0_0_14px_rgba(255,215,0,0.6)]"
+                  >
+                    参加する
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* フッターHUD */}
+        <footer className="mt-3 text-[11px] text-white/60 tracking-[0.25em]">
+          ● PLAYERS: -- LOBBY ● DEALER: READY
+        </footer>
       </div>
     </main>
   );
@@ -179,8 +254,15 @@ function HomeContent() {
 
 export default function Home() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-black text-[#FFD700] font-dotgothic flex items-center justify-center">
+          読み込み中...
+        </div>
+      }
+    >
       <HomeContent />
     </Suspense>
   );
 }
+

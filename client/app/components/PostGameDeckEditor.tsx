@@ -336,7 +336,7 @@ export default function PostGameDeckEditor({ socket, roomId, userId, state, onCl
                             onChange={(e) => handleUpdateDraft({ ...draft, name: e.target.value })}
                             placeholder="テンプレート名"
                         />
-                        <span className="text-xs text-gray-500 ml-2">{rebuildStatus}</span>
+                        <span className="text-xs text-gray-500 ml-2">{rebuildStatus != null ? String(rebuildStatus) : ''}</span>
                     </div>
                     <div className="flex items-center gap-2">
                         {/* MixJuice Special UI (Top Right or Toolbar?) - Let's put it in body using specs, but keep header clean */}
@@ -363,7 +363,7 @@ export default function PostGameDeckEditor({ socket, roomId, userId, state, onCl
                                         : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200'
                                         }`}
                                 >
-                                    {p.title}
+                                    {String(p?.title ?? '')}
                                 </button>
                             ))}
                             <button onClick={addPile} className="px-3 py-1 text-gray-500 hover:text-white font-bold text-lg bg-gray-800 rounded border border-gray-700 hover:border-gray-500 transition" title="山札追加">+</button>
@@ -419,7 +419,7 @@ export default function PostGameDeckEditor({ socket, roomId, userId, state, onCl
                         <div className="max-w-7xl mx-auto">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-xl font-bold text-gray-200 flex items-center gap-2">
-                                    {currentPile.title}
+                                    {String(currentPile?.title ?? '')}
                                     <span className="text-sm font-normal text-gray-500 bg-black/20 px-2 py-0.5 rounded-full">{filteredCards.length} 枚</span>
                                 </h2>
                                 <button onClick={() => addCard(currentPile.pileId)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg transition active:scale-95 flex items-center gap-2">
@@ -469,7 +469,7 @@ export default function PostGameDeckEditor({ socket, roomId, userId, state, onCl
                                             <div className="flex gap-2">
                                                 <input
                                                     className={`flex-1 bg-black/40 border border-gray-700 rounded px-2 py-1.5 text-sm font-bold text-center outline-none focus:border-blue-500 transition ${c.isDisabled ? 'text-gray-500 line-through' : 'text-white'}`}
-                                                    value={c.name}
+                                                    value={String(c?.name ?? '')}
                                                     onChange={(e) => updateCard(currentPile.pileId, c.id, 'name', e.target.value)}
                                                     placeholder="カード名"
                                                 />
