@@ -67,21 +67,21 @@
 
         function joinGame() {
             const name = document.getElementById('nickname').value || 'Player' + Math.floor(Math.random()*100);
-            document.getElementById('my-name').innerText = name;
+            document.getElementById('my-name').textContent = name;
             
             // Connect to SAME origin (Serving from 3010)
             socket = io(); 
 
             socket.on('connect', () => {
-                document.getElementById('status').innerText = 'Connected';
+                document.getElementById('status').textContent = 'Connected';
                 // Auto-join a default 'Lobby' for recovery
                 socket.emit('join_room', { roomId: 'LOBBY', nickname: name, userId: myId }, (res) => {
                     if (res.error) alert(res.error);
                     else {
                         document.getElementById('login-screen').style.display = 'none';
                         document.getElementById('app').style.display = 'block';
-                        document.getElementById('room-id').innerText = res.roomCode || 'LOBBY';
-                        renderState(res.state || res);
+                        document.getElementById('room-id').textContent = res.roomCode || res.data?.roomId || 'LOBBY';
+                        renderState(res.state || res.data || res);
                     }
                 });
             });
@@ -91,7 +91,7 @@
             });
 
             socket.on('disconnect', () => {
-                document.getElementById('status').innerText = 'Disconnected';
+                document.getElementById('status').textContent = 'Disconnected';
             });
         }
 
@@ -110,11 +110,11 @@
             log.scrollTop = log.scrollHeight;
 
             // Hand
-            const myPlayer = state.players.find(p => p.id === myId);
+            const myPlayer = state.players && state.players.find(p => p.id === myId);
             const handDiv = document.getElementById('hand-area');
             handDiv.innerHTML = '';
             if (myPlayer) {
-                myPlayer.hand.forEach((card, i) => {
+                (myPlayer.hand || []).forEach((card, i) => {
                     const el = document.createElement('div');
                     el.className = 'card';
                     el.textContent = card.name || '?';
@@ -131,9 +131,9 @@
                 el.className = 'card';
                 el.textContent = (obj.card && obj.card.name) || '?';
                 el.style.position = 'absolute';
-                el.style.left = (50 + (obj.x || 0)) + '%'; // Simplified
+                el.style.left = (50 + (obj.x || 0)) + '%';
                 el.style.top = (50 + (obj.y || 0)) + 'px';
-                el.title = `Played by ${obj.ownerName}`;
+                el.title = 'Played by ' + (obj.ownerName || '');
                 tableDiv.appendChild(el);
             });
         }
@@ -142,7 +142,7 @@
             e.preventDefault();
             const msg = document.getElementById('chat-msg').value;
             if (!msg) return;
-            socket.emit('game_action', { roomId: 'LOBBY', type: 'chat', payload: { message: msg }, userId: myId }, () => {}); // Ack
+            socket.emit('game_action', { roomId: 'LOBBY', type: 'chat', payload: { message: msg }, userId: myId }, () => {});
             document.getElementById('chat-msg').value = '';
         }
         
