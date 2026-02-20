@@ -53,7 +53,13 @@ app.use(express.json({ limit: '10mb' }));
 
 // 疎通確認用（Next 未起動でも応答）
 app.get('/api/health', (req, res) => res.json({ ok: true, message: 'BoardGame Venue API' }));
-// app.use(express.static('public')); 
+
+// 本番: build.sh で client/public が server/public にコピーされるので、画像などをここで配信
+const publicDir = path.join(__dirname, 'public');
+const fs = require('fs');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+} 
 
 // Connection Logging
 io.on('connection', (socket) => {
