@@ -3,13 +3,12 @@ const { GoogleGenAI } = require('@google/genai');
 
 async function test() {
     console.log("Testing SDK with gemini-flash-latest...");
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!process.env.GEMINI_API_KEY) {
         console.error("No API Key found");
         return;
     }
 
-    const genAI = new GoogleGenAI({ apiKey });
+    const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const modelId = "gemini-flash-latest";
 
     try {

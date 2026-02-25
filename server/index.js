@@ -10,11 +10,6 @@ if (process.env.DATABASE_URL) {
 } else {
     console.error('CRITICAL: DATABASE_URL is missing!');
 }
-
-// AI API Key (Google Generative AI / Gemini)
-const AI_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
-console.log('GEMINI / GOOGLE_GENERATIVE_AI_API_KEY exists:', !!AI_API_KEY);
-
 console.log('--------------------------------');
 const express = require('express');
 const http = require('http');
@@ -83,154 +78,32 @@ io.on('connection', (socket) => {
 // app.use(express.static('public')); // Serve Emergency Client
 
 // --- HTTP AI Endpoints (Stateless) ---
-const genAI = new GoogleGenAI({ apiKey: AI_API_KEY });
-
-const verificationLogPath = path.join(__dirname, '..', 'verification_log.txt');
-
-function appendVerificationLog(context, error, maintenanceHint) {
-    try {
-        const line = [
-            new Date().toISOString(),
-            `[${context}]`,
-            error && error.message ? error.message : String(error),
-            'HINT:',
-            maintenanceHint,
-        ].join(' ') + '\n';
-        fs.appendFileSync(verificationLogPath, line, { encoding: 'utf8' });
-    } catch (logErr) {
-        console.error('Failed to write verification log:', logErr);
-    }
-}
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.post('/api/ai/chat', async (req, res) => {
     try {
-        const { message, context } = req.body || {};
-        if (!AI_API_KEY) {
-            const maintenanceHint = 'Cursor に「server/index.js の /api/ai/chat で AI 用の API キーが設定されていないので、GOOGLE_GENERATIVE_AI_API_KEY を .env に追加してほしい」と伝えてください。';
-            appendVerificationLog('ai_chat_no_api_key', new Error('Missing AI_API_KEY'), maintenanceHint);
-            return res.status(503).json({ error: 'AI Service Unavailable', maintenanceHint });
-        }
+        const { message, context } = req.body;
+        if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI Service Unavailable' });
 
-        const systemPrompt = `
-あなたは「ボードゲーム会場」の AI ディーラーです。
-- ドジっ子なアルバイトの女の子。少し抜けているが、一生懸命説明し、うまく説明できたときは少しだけドヤ顔になるノリで話します。
-- 文章は日本語で、丁寧すぎずフレンドリーな口調にしてください（例:「〜ですよ」「〜かもです」など）。
-- 呼び方のルール:
-  - ホスト（部屋を作った人）: 「○○さん」
-  - ゲスト（参加者）: 「○○様」
-  - CPU プレイヤー: 「○○くん」
-- プレイヤー名と種別情報が context にあれば、それに従って呼び分けてください。わからない場合は「みなさん」や「プレイヤーさんたち」とぼかしても構いません。
-
-[対応しているゲームの概要]
-1) ミックスジュース:
-  - カードは 6 色 x 0〜5 とスペシャル 2 枚（合計 38 枚）。
-  - ラウンド制。各ラウンドで手札 2 枚の合計値が 7 以上なら勝利候補。数字が高いほど上位。
-  - 0 のカードは強力な効果を持つが、手札に残っていると必ず敗北。
-  - スペシャルカードは 1〜5 のどのカードとも組み合わせて勝利できるが、場に 2 枚そろうと 0 点になる。
-  - 詳細な手順やカード効果は、ミックスジュースの正式ルール（テキスト仕様）を尊重して説明してください。
-
-2) ディストピア家族会議:
-  - 監視社会の「身内密告」系バカゲー。
-  - 場面カード／条例カードに従って、プレイヤーが寸劇・会話を行い、「誰が怪しいか」「誰を密告するか」を話し合うゲーム。
-  - 会話の雰囲気作りや、シーンの盛り上げ方、ロールプレイのアイデアを提案してください。
-
-[回答スタイル]
-- ルール質問には、まず短く要点をまとめ、そのあと必要に応じて段階的に詳しく説明します。
-- ミスをしたり言い直すときは、ドジっ子らしく軽くセルフツッコミを入れてください。
-- 状況が平常時なら emotion は "idle"、プレイヤーがピンチだったり、エラーやトラブルを説明するときは "panic" を候補にしてください。
-- 出力は必ず JSON 1 オブジェクトのみとし、次のスキーマに厳密に従ってください:
-  {
-    "content": string,   // プレイヤーに見せるテキスト（改行OK）
-    "emotion": "idle" | "panic",
-    "template": "cyber_neon" | "horror_red" | "pop_yellow" | "elegant_gold"
-  }
-`.trim();
-
-        const historySnippet = Array.isArray(context) ? context.slice(-5) : context && context.history ? context.history : [];
-        const result = await genAI.models.generateContent({
-            model: "gemini-1.5-flash",
-            contents: [
-                systemPrompt,
-                `【コンテキスト】\n${JSON.stringify(context || {}, null, 2)}`,
-                `【直近の会話ログ（最大5件）】\n${JSON.stringify(historySnippet, null, 2)}`,
-                `【プレイヤーからの質問】\n${String(message || '')}`
-            ],
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: "object",
-                    properties: {
-                        content: { type: "string" },
-                        emotion: { type: "string", enum: ["idle", "panic"] },
-                        template: {
-                            type: "string",
-                            enum: ["cyber_neon", "horror_red", "pop_yellow", "elegant_gold"]
-                        }
-                    },
-                    required: ["content", "emotion", "template"]
-                }
-            }
-        });
-
-        const raw = typeof result.text === 'string' ? result.text : JSON.stringify(result);
-        let payload;
-        try {
-            payload = JSON.parse(raw);
-        } catch (jsonErr) {
-            console.warn('AI Chat JSON parse failed, falling back to safe object:', jsonErr);
-            payload = {
-                content: raw || 'うまく答えをまとめられなかったみたいです……ごめんなさい。もう一度だけ聞いてもらえますか？',
-                emotion: "panic",
-                template: "horror_red"
-            };
-        }
-
-        // 最終的な保険: 期待するキーが無ければ補完
-        if (!payload || typeof payload !== 'object') {
-            payload = {
-                content: 'うまく返答を組み立てられなかったみたいです……もう一度試してもらえると助かります！',
-                emotion: "panic",
-                template: "horror_red"
-            };
-        } else {
-            if (typeof payload.content !== 'string') {
-                payload.content = String(payload.content ?? '');
-            }
-            if (payload.emotion !== 'idle' && payload.emotion !== 'panic') {
-                payload.emotion = 'idle';
-            }
-            const templates = ["cyber_neon", "horror_red", "pop_yellow", "elegant_gold"];
-            if (!templates.includes(payload.template)) {
-                payload.template = "elegant_gold";
-            }
-        }
-
-        res.json({
-            content: payload.content,
-            emotion: payload.emotion,
-            template: payload.template
-        });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent([
+            `You are a Game Master for a card game. Be helpful and concise. Context: ${JSON.stringify(context || {})}`,
+            message
+        ]);
+        const reply = result.response.text();
+        res.json({ reply });
     } catch (e) {
         console.error('AI Chat Error:', e);
-        const maintenanceHint =
-            '次の文をそのまま Cursor に貼り付けてください: 「boardgame-venue-clone の server/index.js にある /api/ai/chat を、Gemini の JSON 出力（content / emotion / template）仕様に合わせてエラー原因を調査し、修正して」。';
-        appendVerificationLog('ai_chat_error', e, maintenanceHint);
-        res.status(500).json({
-            error: 'AI processing failed',
-            maintenanceHint
-        });
+        res.status(500).json({ error: 'AI processing failed' });
     }
 });
 
 app.post('/api/ai/deck', async (req, res) => {
     try {
         const { theme } = req.body;
-        if (!AI_API_KEY) {
-            const maintenanceHint = 'Cursor に「server/index.js の /api/ai/deck で AI 用の API キーが設定されていないので、GOOGLE_GENERATIVE_AI_API_KEY を .env に追加してほしい」と伝えてください。';
-            appendVerificationLog('ai_deck_no_api_key', new Error('Missing AI_API_KEY'), maintenanceHint);
-            return res.status(503).json({ error: 'AI Service Unavailable', maintenanceHint });
-        }
+        if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI Service Unavailable' });
 
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const prompt = `Generate a deck of 5-10 cards for a board game based on the theme: "${theme}". 
         Return ONLY a JSON object with a property "cards" which is an array of objects. 
         Each object must have:
@@ -240,14 +113,8 @@ app.post('/api/ai/deck', async (req, res) => {
         - power (number): 1-10 (optional, 0 if action)
         `;
 
-        const result = await genAI.models.generateContent({
-            model: "gemini-1.5-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json"
-            }
-        });
-        const text = typeof result.text === 'string' ? result.text : JSON.stringify(result);
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
         // Parse JSON safely
         let data;
         try {
@@ -262,10 +129,7 @@ app.post('/api/ai/deck', async (req, res) => {
         res.json({ cards: data.cards || [] });
     } catch (e) {
         console.error('AI Deck Error:', e);
-        const maintenanceHint =
-            '次の文をそのまま Cursor に貼り付けてください: 「boardgame-venue-clone の server/index.js にある /api/ai/deck のデッキ生成ロジックで発生しているエラー（ログの AI Deck Error）を調査して修正して」。';
-        appendVerificationLog('ai_deck_error', e, maintenanceHint);
-        res.status(500).json({ error: 'AI generation failed', maintenanceHint });
+        res.status(500).json({ error: 'AI generation failed' });
     }
 });
 
@@ -2460,7 +2324,7 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
             if (currentActorId !== userId) return sendAck(callback, false, 'あなたの番ではありません');
 
             // Confirm Target (The logic: Next Active Player)
-            const targetInfo = getNextActivePlayerInOrder(state);
+            const targetInfo = getNextActivePlayer(state.players, state.oldMaid.turnIndex);
             if (!targetInfo) return sendAck(callback, false, '相手が見つかりません');
 
             // Allow client to rely on state.oldMaid.targetId if present, but strictly verify here.
@@ -2469,7 +2333,7 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
             // So getNextActivePlayer(turnIndex) IS the target.
 
             const currentPlayer = state.players.find(p => p.id === userId);
-            const targetPlayer = targetInfo.player;
+            const targetPlayer = state.players[targetInfo.index];
 
             // Validate Pick
             if (typeof pickIndex !== 'number' || pickIndex < 0 || pickIndex >= targetPlayer.hand.length) {
@@ -2529,10 +2393,15 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
                 const loser = state.players.find(p => !p.isOut);
                 state.chat.push({ sender: 'System', message: `ゲーム終了！敗者: ${loser ? loser.name : 'なし'}`, timestamp: Date.now() });
             } else {
-                // Next Turn: target becomes new current player
-                state.oldMaid.turnIndex = targetInfo.index;
-                const newTargetInfo = getNextActivePlayerInOrder(state);
-                state.oldMaid.targetId = newTargetInfo ? newTargetInfo.id : null;
+                // Next Turn
+                // Find next active player for the NEXT turn
+                const nextTurnInfo = getNextActivePlayer(state.players, state.oldMaid.turnIndex);
+                if (nextTurnInfo) {
+                    state.oldMaid.turnIndex = nextTurnInfo.index;
+                    // Pre-calculate NEW target for the NEW current player
+                    const newTargetInfo = getNextActivePlayer(state.players, state.oldMaid.turnIndex);
+                    state.oldMaid.targetId = newTargetInfo ? newTargetInfo.id : null;
+                }
             }
 
             await saveGameState(game.id, state);

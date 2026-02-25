@@ -5,7 +5,6 @@ import Card from './Card';
 import GameSetupOverlay from './GameSetupOverlay';
 import MemoryGameView from './MemoryGameView';
 import MixJuiceGameView from './MixJuiceGameView';
-import V0GameBoard, { V0Card, V0Opponent, cardToV0 } from './V0GameBoard';
 
 type Player = { id: string; name: string; hand: any[]; isOut?: boolean; role?: any; isSpectator?: boolean };
 type FreeTalkState = {
@@ -228,9 +227,8 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                     setPulledCard(res.data.drawnCard);
                     setTimeout(() => setPulledCard(null), 1500);
                 }
-            } else {
-                console.warn(res.error || 'Pick failed');
             }
+            else alert(res.error || 'Pick failed');
         });
     };
 
@@ -257,26 +255,15 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
         if (index === 2) return { top: '50%', right: '20px', transform: 'translateY(-50%)' };
         return { top: '10px', left: `${20 + index * 10}%` };
     };
-    const isSetup = state.phase === 'setup';
-
-    const useV0Layout = (isOldMaid || (state.phase === 'playing' && state.selectedMode === 'tabletop')) && !isMixJuice && state.selectedMode !== 'memory';
-
     return (
-    <section className="relative felt-table rounded-xl overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full min-h-[200px]">
-        {/* v0 Corner decorations */}
-        <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-[#3a9a5a] opacity-60 pointer-events-none z-0" />
-        <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-[#3a9a5a] opacity-60 pointer-events-none z-0" />
-        <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-[#3a9a5a] opacity-60 pointer-events-none z-0" />
-        <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-[#3a9a5a] opacity-60 pointer-events-none z-0" />
-        {/* v0 Center diamond pattern */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 z-0">
-            <div className="w-40 h-40 border-2 border-[#4aba6a] rotate-45" />
-        </div>
-
+    <section className="relative bg-[#2a2d36] overflow-x-auto overflow-y-hidden flex flex-col shadow-inner select-none h-full">
         {/* 画面が隠れないように、デバッグラベルを小さく右上にバッジ表示 */}
         <div className="absolute top-1 right-1 z-50 text-[10px] font-mono text-red-200 bg-black/70 px-2 py-1 rounded-md opacity-70 pointer-events-none max-w-[220px] truncate">
             {String(state?.debugVersion ?? 'v8.0')}
         </div>
+
+            {/* Background Decor */}
+            <div className="absolute top-2 left-2 text-gray-700 font-bold text-xl opacity-20 select-none pointer-events-none tracking-widest">boardgame-venue</div>
 
             {/* Phase 3: Reveal Popup Overlay */}
             {revealPopup && (
@@ -516,149 +503,15 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
 
             {isMyTurn && isOldMaid && oldMaidData.status !== 'finished' && (
                 <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-[90] pointer-events-none">
-                    <div className="rpg-border rounded-lg px-5 py-3 bg-black/70 backdrop-blur-sm border-[var(--neon-green)]/50 shadow-[0_0_20px_rgba(0,255,136,0.3)]">
-                        <span className="text-lg font-bold neon-green tracking-wider">あなたの番です！</span>
-                        <div className="text-xs text-[var(--muted-foreground)] mt-1 text-center">カードを引いてください</div>
+                    <div className="bg-yellow-500/90 text-black px-8 py-4 rounded-xl shadow-2xl transform animate-bounce border-4 border-yellow-200">
+                        <span className="text-3xl font-bold">あなたの番です！</span>
+                        <div className="text-sm font-bold mt-1 text-center">カードを引いてください</div>
                     </div>
                 </div>
             )}
 
-            {/* Center Area (Objects & Opponents) - v0 felt table content */}
-            <div className="flex-1 relative w-full h-full min-w-[800px] md:min-w-0 z-10">
-                {useV0Layout ? (
-                    <V0GameBoard
-                        opponents={opponents.map((p: Player) => {
-                            const isTurn = isOldMaid && oldMaidData.order && oldMaidData.order[oldMaidData.turnIndex] === p.id;
-                            const isTarget = isMyTurn && p.id === targetId;
-                            const canPick = isMyTurn && isTarget;
-                            const isWinner = isOldMaid && oldMaidData.winners?.includes(p.id);
-                            return {
-                                id: p.id,
-                                name: String((p as any).name ?? ''),
-                                hand: p.hand || [],
-                                isActive: isTurn,
-                                isCPU: !!(p as any).isBot,
-                                isWinner,
-                                isOut: p.isOut,
-                                isTarget,
-                                canPick,
-                                extraContent: isOldMaid && (
-                                    <div className="flex flex-col items-center gap-1 mt-2">
-                                        <div className="flex justify-center -space-x-5 min-h-[60px]">
-                                            {p.hand?.length === 0 && isWinner ? (
-                                                <span className="text-2xl">🎉</span>
-                                            ) : (
-                                                (p.hand || []).map((_c: any, cIdx: number) => {
-                                                    const isSelected = canPick && selectedCardIdx === cIdx;
-                                                    return (
-                                                        <div
-                                                            key={cIdx}
-                                                            className={`transition-all duration-200 origin-bottom ${canPick ? 'cursor-pointer hover:-translate-y-2' : 'cursor-default opacity-90'} ${isSelected ? '-translate-y-2 scale-110 z-20' : ''}`}
-                                                            onClick={() => canPick && setSelectedCardIdx(cIdx)}
-                                                            onKeyDown={(e) => canPick && e.key === 'Enter' && setSelectedCardIdx(cIdx)}
-                                                            role="button"
-                                                            tabIndex={canPick ? 0 : -1}
-                                                        >
-                                                            <V0Card suit="spade" rank="A" faceDown size="small" />
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                        {canPick && selectedCardIdx !== null && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handlePick(p.id)}
-                                                className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-xs px-4 py-1.5 rounded-full shadow-lg"
-                                            >
-                                                これにする！
-                                            </button>
-                                        )}
-                                    </div>
-                                ),
-                            } as V0Opponent;
-                        })}
-                        myHand={myPlayer?.hand || []}
-                        centerContent={
-                            isOldMaid ? (
-                                <div className="flex flex-col items-center justify-center gap-2">
-                                    <div className="relative w-24 h-32 flex flex-col items-center justify-center p-2 rounded-lg border-2 border-dashed border-gray-600 bg-gray-900/40">
-                                        <div className="text-gray-500 font-bold text-center text-xs opacity-50">捨て札</div>
-                                        <div className="mt-1 text-gray-400 font-bold text-xl">{oldMaidData.discardPile?.length || 0}</div>
-                                    </div>
-                                    {(() => {
-                                        const pile = oldMaidData.discardPile || [];
-                                        if (pile.length < 2) return null;
-                                        const lastTwo = pile.slice(-2);
-                                        return (
-                                            <div className="flex -space-x-8 mt-2">
-                                                {lastTwo.map((c: any, i: number) => {
-                                                    const v0 = cardToV0(c);
-                                                    if (!v0) return null;
-                                                    return (
-                                                        <div key={i} style={{ transform: 'rotate(6deg)' }}>
-                                                            <V0Card suit={v0.suit} rank={v0.rank} size="small" />
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-center gap-8">
-                                    <div className={`${!myPlayer?.isSpectator ? 'cursor-pointer group' : 'opacity-80 pointer-events-none'}`} onClick={() => !myPlayer?.isSpectator && drawCard()}>
-                                        {state.deck?.length > 0 ? (
-                                            <div className="relative">
-                                                {state.deck.length > 1 && <div className="absolute top-1 left-1 w-16 h-24 bg-blue-800 rounded" />}
-                                                <div className="relative w-16 h-24 bg-blue-900 rounded border-2 border-blue-400 flex flex-col items-center justify-center shadow-xl">
-                                                    <span className="text-xl">🎴</span>
-                                                    <span className="text-[10px] text-blue-200 font-bold">{state.deck.length}</span>
-                                                </div>
-                                                {!myPlayer?.isSpectator && <div className="absolute -bottom-5 w-full text-center text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition">引く</div>}
-                                            </div>
-                                        ) : (
-                                            <div className="w-16 h-24 border-2 border-dashed border-gray-600 rounded flex items-center justify-center"><span className="text-gray-600 text-[10px]">空</span></div>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-1 flex-wrap justify-center max-w-[300px]">
-                                        {state.table?.map((obj: any, i: number) => {
-                                            const v0 = cardToV0(obj?.card);
-                                            return (
-                                                <div key={i} className="flex flex-col items-center">
-                                                    {obj?.ownerName && <span className="text-[9px] text-gray-500 mb-1">{obj.ownerName}</span>}
-                                                    {v0 ? <V0Card suit={v0.suit} rank={v0.rank} size="small" /> : <Card card={obj?.card} className="w-10 h-14" />}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )
-                        }
-                        turnText={isOldMaid && oldMaidData.status !== 'finished' && oldMaidData.order
-                            ? `手番: ${String(state.players.find((p: any) => p.id === oldMaidData.order[oldMaidData.turnIndex])?.name ?? '')}`
-                            : ''
-                        }
-                        showActionButtons={!isOldMaid}
-                        onPlayCard={!isOldMaid ? playCard : undefined}
-                        onPass={!isOldMaid ? drawCard : undefined}
-                        isSetup={isSetup}
-                        myPlayerName={myPlayer?.name}
-                        isMyTurn={isOldMaid ? isMyTurn : true}
-                        isSpectator={myPlayer?.isSpectator ?? false}
-                    />
-                ) : (
-                    <>
-                {/* WAITING FOR GAME... (setup phase, behind overlay) */}
-                {isSetup && (
-                    <div className="absolute inset-0 flex items-center justify-center text-[#3a9a5a]/60 font-sans pointer-events-none">
-                        <div className="text-center">
-                            <div className="text-3xl mb-3 tracking-[0.5em]">{"* * * *"}</div>
-                            <div className="text-base tracking-wider neon-green opacity-60">WAITING FOR GAME...</div>
-                            <div className="text-xs mt-2 text-[#3a9a5a]/40">{"AIディーラーにルールを伝えて場を作ろう"}</div>
-                        </div>
-                    </div>
-                )}
+            {/* Center Area (Objects & Opponents) */}
+            <div className="flex-1 relative w-full h-full min-w-[800px] md:min-w-0">
 
                 {/* Deck (Only if NOT Old Maid, or Old Maid specific deck?) */}
                 {/* In Old Maid, deck is dealt out. So handle check */}
@@ -702,22 +555,18 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                             <div className="mt-1 text-gray-400 font-bold text-xl">{oldMaidData.discardPile?.length || 0}</div>
                         </div>
 
-                        {/* Last Discarded Pair (if any) - CardShell/V0Card */}
+                        {/* Last Discarded Pair (if any) */}
                         {(() => {
                             const pile = oldMaidData.discardPile || [];
                             if (pile.length < 2) return null;
                             const lastTwo = pile.slice(-2);
                             return (
                                 <div className="absolute left-full ml-6 flex -space-x-10">
-                                    {lastTwo.map((c: any, i: number) => {
-                                        const v0 = cardToV0(c);
-                                        if (!v0) return <Card key={i} card={c} className="shadow-lg w-16 h-24" />;
-                                        return (
-                                            <div key={i} className="relative transform rotate-6 hover:rotate-0 transition-transform duration-300">
-                                                <V0Card suit={v0.suit} rank={v0.rank} size="small" />
-                                            </div>
-                                        );
-                                    })}
+                                    {lastTwo.map((c: any, i: number) => (
+                                        <div key={i} className="relative transform rotate-6 hover:rotate-0 transition-transform duration-300">
+                                            <Card card={c} className="shadow-lg w-16 h-24 border-gray-500" />
+                                        </div>
+                                    ))}
                                     <div className="absolute top-full text-[10px] text-gray-400 w-full text-center mt-2 font-bold tracking-wider">捨て札<br />(ペア)</div>
                                 </div>
                             );
@@ -875,8 +724,6 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                         </div>
                     );
                 })}
-                    </>
-                )}
             </div>
 
             {/* Mix Juice View (Overlay Style but integrated) */}
@@ -891,9 +738,9 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                 />
             )}
 
-            {/* My Hand (Bottom) - Hide in MixJuice and when using V0 layout */}
+            {/* My Hand (Bottom) - Hide in MixJuice (Handled by MixJuiceGameView) */}
             {
-                !myPlayer?.isSpectator && !isMixJuice && !useV0Layout && (
+                !myPlayer?.isSpectator && !isMixJuice && (
                     <div className="absolute bottom-0 left-0 w-full h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex flex-col justify-end pb-4 px-4 overflow-x-hidden pointer-events-none">
                         {/* Phase 3: Role Display (My Letter) */}
                         {/* Phase 3: Role Display (My Letter) - Adjusted Position */}
@@ -992,8 +839,7 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                 )
             }
 
-            {/* Bottom: Player Hand - Hide when using V0 layout */}
-            {!useV0Layout && (
+            {/* Bottom: Player Hand */}
             <div className="flex-none bg-gray-900/95 border-t border-gray-800 relative z-20 pb-safe">
                 {/* Hand Actions / Area */}
                 <div className="min-h-[72px] flex flex-col justify-end">
@@ -1054,7 +900,6 @@ export default function UnifiedTable({ roomId, userId, state, socket, drawCard, 
                     </div>
                 </div>
             </div>
-            )}
 
             {
                 myPlayer?.isSpectator && (
