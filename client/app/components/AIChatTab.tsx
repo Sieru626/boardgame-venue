@@ -90,24 +90,17 @@ export default function AIChatTab({ socket, roomId, gmChat, onEmotionChange }: A
                     onEmotionChange(dealer.emotion);
                 }
             } else {
-                setLocalChat(prev => {
-                    const next: LocalMessage[] = [
-                        ...prev,
-                        {
-                            sender: 'ai',
-                            text: `(Error: ${String(data.error ?? 'Unknown error')})`,
-                            emotion: 'panic',
-                        },
-                    ];
-                    if (data.maintenanceHint) {
-                        next.push({
+                setLocalChat(prev => [
+                    ...prev,
+                    { sender: 'ai', text: `(Error: ${String(data.error ?? 'Unknown error')})`, emotion: 'panic' },
+                    ...(data.maintenanceHint
+                        ? [{
                             sender: 'ai',
                             text: `システムからのお願い:\n${String(data.maintenanceHint)}`,
                             emotion: 'panic',
-                        });
-                    }
-                    return next;
-                });
+                        }]
+                        : []),
+                ]);
 
                 if (onEmotionChange) {
                     onEmotionChange('panic');
