@@ -33,9 +33,9 @@ const prisma = new PrismaClient();
 const app = express();
 const server = http.createServer(app);
 
-// CORS Configuration
+// CORS Configuration（開発時は全オリジン許可で LAN 内の他端末からアクセス可能に）
 const clientUrls = process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',') : [];
-const allowedOrigins = dev ? ["http://localhost:3000", "http://localhost:3002", "http://localhost:3010"] : (clientUrls.length > 0 ? clientUrls : "*");
+const allowedOrigins = dev ? true : (clientUrls.length > 0 ? clientUrls : "*");
 
 const io = new Server(server, {
     cors: {
@@ -53,6 +53,10 @@ app.use(express.json({ limit: '10mb' }));
 
 // 疎通確認用（Next 未起動でも応答）
 app.get('/api/health', (req, res) => res.json({ ok: true, message: 'BoardGame Venue API' }));
+
+// Next 準備完了まで「読み込み中」を返すキャッチオール用（登録は末尾で行う）
+let nextHandle = null;
+const loadingHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Board Game Venue</title></head><body><p>読み込み中...</p><p><a href="/api/health">/api/health</a></p><script>setTimeout(function(){location.reload();},2000);</script></body></html>';
 
 // 本番: build.sh で client/public が server/public にコピーされるので、画像などをここで配信
 const publicDir = path.join(__dirname, 'public');
@@ -77,24 +81,241 @@ io.on('connection', (socket) => {
 
 // app.use(express.static('public')); // Serve Emergency Client
 
-// --- HTTP AI Endpoints (Stateless) ---
+// --- HTTP AI Endpoints ---
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+/**
+ * AIディーラー用チャットエンドポイント（フェーズ1）
+ * UI からの入力: { message, context } （既存仕様を維持）
+ * 追加で roomId / userId が渡されていれば、盤面カンペ＆思い出機能を有効化する。
+ */
 app.post('/api/ai/chat', async (req, res) => {
-    try {
-        const { message, context } = req.body;
-        if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI Service Unavailable' });
+    console.log('[AI CHAT] start', { body: req.body });
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const result = await model.generateContent([
-            `You are a Game Master for a card game. Be helpful and concise. Context: ${JSON.stringify(context || {})}`,
-            message
-        ]);
-        const reply = result.response.text();
-        res.json({ reply });
+    const FALLBACK_PANIC = {
+        speech: 'ひぇぇ！マニュアルを濡らしてしまって…ちょっと待ってくださいね！',
+        // 既存UI(AIChatTab)互換用
+        reply: 'ひぇぇ！マニュアルを濡らしてしまって…ちょっと待ってくださいね！',
+        emotion: 'panic',
+        actionCommand: { type: 'error', reason: 'AI backend fallback' }
+    };
+
+    try {
+        if (!process.env.GEMINI_API_KEY) {
+            console.warn('[AI CHAT] GEMINI_API_KEY is missing');
+            console.log('[AI CHAT] end (no-key fallback)', { response: FALLBACK_PANIC });
+            return res.status(503).json(FALLBACK_PANIC);
+        }
+
+        const { message, context, roomId, userId } = req.body || {};
+        if (!message || typeof message !== 'string') {
+            console.warn('[AI CHAT] invalid request, message is required');
+            return res.status(400).json({ error: 'message is required' });
+        }
+
+        // --- 1. 盤面カンペ用の状態取得 ---
+        let boardSnapshot = null;
+        let memoryLogs = [];
+
+        try {
+            if (roomId && typeof roomId === 'string') {
+                const room = await prisma.room.findUnique({
+                    where: { code: roomId },
+                    include: { games: { orderBy: { updatedAt: 'desc' }, take: 1 } }
+                });
+                const latestGame = room?.games?.[0];
+                if (latestGame) {
+                    const state = JSON.parse(latestGame.stateJson || '{}');
+                    const players = Array.isArray(state.players) ? state.players : [];
+                    boardSnapshot = {
+                        phase: state.phase || 'unknown',
+                        selectedMode: state.selectedMode || state.phase || 'tabletop',
+                        players: players.map((p) => ({
+                            id: String(p.id || ''),
+                            name: String(p.name || ''),
+                            isHost: !!p.isHost,
+                            isSpectator: !!p.isSpectator,
+                            isBot: !!p.isBot,
+                            handCount: Array.isArray(p.hand) ? p.hand.length : 0,
+                            status: p.status || 'unknown'
+                        })),
+                        deckCount: Array.isArray(state.deck) ? state.deck.length : 0,
+                        tableCount: Array.isArray(state.table) ? state.table.length : 0,
+                        version: state.version || 0
+                    };
+
+                    // --- 2. 思い出機能: 直近の会話履歴を時系列で取得（多ターン用） ---
+                    const rawLogs = await prisma.conversationLog.findMany({
+                        where: { roomCode: room.code },
+                        orderBy: { createdAt: 'desc' },
+                        take: 20
+                    });
+                    memoryLogs = rawLogs.reverse();
+                }
+            }
+        } catch (stateErr) {
+            console.warn('[AI Dealer] state/memory fetch failed:', stateErr.message);
+        }
+
+        // 呼び分けのための簡易ロール推定
+        const speakerRole =
+            !roomId || !userId || !boardSnapshot
+                ? 'guest'
+                : (() => {
+                    const p = boardSnapshot.players.find((pl) => pl.id === userId);
+                    if (!p) return 'guest';
+                    if (p.isBot) return 'cpu';
+                    if (p.isHost) return 'host';
+                    return 'guest';
+                })();
+
+        // --- 3. Gemini へのプロンプト構築 ---
+        const systemInstruction =
+            [
+                    'あなたはオンラインボードゲーム会場のAIディーラー「ディーラーちゃん」です。',
+                    'キャラ設定: ドジっ子アルバイトの女の子。基本は丁寧でオドオド、たまに調子に乗ってドヤ顔。',
+                    '--- 呼び方ルール ---',
+                    'host ロールの人は「◯◯さん」、guest ロールの人は「◯◯様」、cpu ロールの人は「◯◯くん」と必ず呼んでください。',
+                    '--- 出力スタイル ---',
+                    '・「speech」はプレイヤーに話しかける日本語セリフ（です／ます調、句読点多め、絵文字や顔文字は使いすぎない）。',
+                    '・「emotion」は "idle" か "panic" のどちらか。',
+                    '・「actionCommand」には将来用のJSONコマンドを入れてください（今は { type: "none" } でもOK）。',
+                    '--- 重要 ---',
+                    '・今回のユーザー発言に直接返答すること。同じ挨拶や定型文の繰り返しは禁止。',
+                    '・ゲームの内部データやJSONはそのまま出さず、「セリフ」として自然に説明すること。',
+                    '--- 盤面カンペ(JSON) ---',
+                    JSON.stringify({
+                        boardSnapshot,
+                        lastMessages: context || []
+                    })
+                ].join('\n');
+
+        // 会話履歴を多ターン（user/model 交互）で渡し、最後に今回のユーザー発言を追加
+        const historyTurns = memoryLogs.map((m) => ({
+            role: m.role === 'dealer' ? 'model' : 'user',
+            parts: [{ text: String(m.utterance || '').trim() || '(発言なし)' }]
+        }));
+        const contents = [
+            ...historyTurns,
+            { role: 'user', parts: [{ text: `話者のロール: ${speakerRole}\n\n${String(message)}` }] }
+        ];
+
+        const result = await genAI.models.generateContent({
+            model: 'gemini-flash-latest',
+            systemInstruction,
+            contents,
+            generationConfig: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: 'object',
+                    properties: {
+                        speech: { type: 'string' },
+                        emotion: { type: 'string', enum: ['idle', 'panic'] },
+                        actionCommand: { type: 'object' }
+                    },
+                    required: ['speech', 'emotion', 'actionCommand']
+                },
+                temperature: 0.8
+            }
+        });
+
+        let parsed;
+        try {
+            let text;
+            if (typeof result.text === 'function') {
+                text = result.text();
+            } else if (result.response && typeof result.response.text === 'function') {
+                text = result.response.text();
+            } else {
+                text = JSON.stringify(result);
+            }
+            let jsonText = text.trim();
+
+            // モデルが ```json ... ``` でラップして返す場合に対応
+            const match = jsonText.match(/```json\s*([\s\S]*?)```/);
+            if (match && match[1]) {
+                jsonText = match[1].trim();
+            }
+
+            parsed = JSON.parse(jsonText);
+        } catch (parseErr) {
+            console.error('[AI Dealer] JSON parse failed:', parseErr);
+            const debugFallback = {
+                ...FALLBACK_PANIC,
+                actionCommand: {
+                    type: 'error',
+                    reason: `[json-parse] ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`
+                }
+            };
+            console.log('[AI CHAT] end (json-parse-fallback)', { response: debugFallback });
+            return res.json(debugFallback);
+        }
+
+        // --- 4. ドジっ子確率 (10%でpanic上書き) ---
+        if (Math.random() < 0.1) {
+            parsed.emotion = 'panic';
+        }
+
+        // --- 5. 会話ログを保存（思い出機能） ---
+        try {
+            if (roomId && userId) {
+                const roomCode = String(roomId);
+                const logsToCreate = [];
+                logsToCreate.push({
+                    roomCode,
+                    userId: String(userId),
+                    role: speakerRole,
+                    utterance: String(message)
+                });
+                logsToCreate.push({
+                    roomCode,
+                    userId: 'DEALER',
+                    role: 'dealer',
+                    utterance: String(parsed.speech || '')
+                });
+                await prisma.conversationLog.createMany({ data: logsToCreate });
+            }
+        } catch (logErr) {
+            console.warn('[AI Dealer] conversation log save failed:', logErr.message);
+        }
+
+        const rawSpeech = typeof parsed.speech === 'string' ? parsed.speech : '';
+        let safeSpeech;
+        if (rawSpeech && rawSpeech.trim().length > 0) {
+            safeSpeech = rawSpeech.trim();
+        } else {
+            const userText = String(message || '');
+            const templates = [
+                (m) => `えっと…「${m}」のことですね。ちょっと考えすぎちゃいました、もう一回だけ教えてもらってもいいですか？`,
+                (m) => `あわわ…「${m}」って、ちゃんと答えたいのに頭が真っ白です…。少しだけ言い直してもらえると助かります…！`,
+                (m) => `ひぇ…！「${m}」について、マニュアルを必死にめくってるところです…！もう一度だけゆっくり聞かせてもらえますか？`
+            ];
+            const idx = Math.floor(Math.random() * templates.length);
+            safeSpeech = templates[idx](userText);
+        }
+
+        const responsePayload = {
+            speech: safeSpeech,
+            // 既存UI(AIChatTab)向けの後方互換フィールド
+            reply: safeSpeech,
+            emotion: parsed.emotion === 'panic' ? 'panic' : 'idle',
+            actionCommand: parsed.actionCommand || { type: 'none' }
+        };
+
+        console.log('[AI CHAT] end (success)', { response: responsePayload });
+        return res.json(responsePayload);
     } catch (e) {
-        console.error('AI Chat Error:', e);
-        res.status(500).json({ error: 'AI processing failed' });
+        console.error('[AI CHAT] fallback triggered:', e);
+        const debugFallback = {
+            ...FALLBACK_PANIC,
+            actionCommand: {
+                type: 'error',
+                reason: `[catch] ${e instanceof Error ? e.message : String(e)}`
+            }
+        };
+        console.log('[AI CHAT] end (catch-fallback)', { response: debugFallback });
+        // 429 / timeout など、どんなエラーでも「ドジっ子パニック」でフォールバック
+        return res.json(debugFallback);
     }
 });
 
@@ -103,7 +324,6 @@ app.post('/api/ai/deck', async (req, res) => {
         const { theme } = req.body;
         if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'AI Service Unavailable' });
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const prompt = `Generate a deck of 5-10 cards for a board game based on the theme: "${theme}". 
         Return ONLY a JSON object with a property "cards" which is an array of objects. 
         Each object must have:
@@ -113,8 +333,20 @@ app.post('/api/ai/deck', async (req, res) => {
         - power (number): 1-10 (optional, 0 if action)
         `;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
+        const result = await genAI.models.generateContent({
+            model: "gemini-flash-latest",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+        });
+
+        let text;
+        if (typeof result.text === 'function') {
+            text = result.text();
+        } else if (result.response && typeof result.response.text === 'function') {
+            text = result.response.text();
+        } else {
+            text = JSON.stringify(result);
+        }
         // Parse JSON safely
         let data;
         try {
@@ -2923,7 +3155,17 @@ socket.on('mixjuice_action', async ({ roomId, userId, type, targetIndex }, callb
 
 function startListening(useNext = false) {
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`Server running on http://localhost:${PORT} (and http://0.0.0.0:${PORT})`);
+        const os = require('os');
+        const nets = os.networkInterfaces();
+        let lanUrl = null;
+        for (const name of Object.keys(nets)) {
+            for (const n of nets[name]) {
+                if (n.family === 'IPv4' && !n.internal) { lanUrl = `http://${n.address}:${PORT}`; break; }
+            }
+            if (lanUrl) break;
+        }
+        console.log(`Server running on http://localhost:${PORT}`);
+        if (lanUrl) console.log(`LAN からアクセス: ${lanUrl}`);
         if (useNext) console.log('Next.js クライアント: http://localhost:' + PORT);
         console.log('疎通確認: http://localhost:' + PORT + '/api/health');
     }).on('error', (err) => {
@@ -2936,16 +3178,23 @@ function startListening(useNext = false) {
     });
 }
 
+// 最後にキャッチオールを登録（API ルートより後にする）
+app.all('*', (req, res) => {
+    if (nextHandle) return nextHandle(req, res);
+    res.type('text/html').send(loadingHtml);
+});
+
+// 起動直後にポートを開く（localhost で接続拒否にならないように）
+startListening(!skipNext && !!nextApp);
+
 if (!skipNext && nextApp) {
     nextApp.prepare().then(() => {
-        app.all('*', (req, res) => handle(req, res));
-        startListening(true);
+        nextHandle = handle;
+        console.log('Next.js 準備完了。http://localhost:' + PORT + ' でアクセスできます。');
     }).catch((err) => {
         console.error('Next.js prepare に失敗しました。API のみで起動します。', err.message || err);
-        app.get('/', (req, res) => res.send('BoardGame Venue API (Next.js 未読み込み)。クライアントは別途 npm run dev で起動してください。'));
-        startListening(false);
+        nextHandle = (req, res) => res.send('BoardGame Venue API (Next.js 未読み込み)。クライアントは別途 npm run dev で起動してください。');
     });
 } else {
-    app.get('/', (req, res) => res.send('BoardGame Venue API Server (Next.js Skipped)'));
-    startListening(false);
+    nextHandle = (req, res) => res.send('BoardGame Venue API Server (Next.js Skipped)');
 }

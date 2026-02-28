@@ -38,7 +38,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${dotGothic.variable} font-dotgothic antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${dotGothic.variable} font-dotgothic antialiased cyber-bg scanlines`}
       >
         {children}
       </body>

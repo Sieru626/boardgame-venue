@@ -27,7 +27,7 @@ function HomeContent() {
       if (loading) setConnectionError(true);
     }, 10000);
 
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    const socketUrl = (typeof window !== 'undefined' ? window.location.origin : '') || process.env.NEXT_PUBLIC_SOCKET_URL || '';
     const socketInstance = socketUrl
       ? io(socketUrl, { transports: ['websocket', 'polling'], withCredentials: true })
       : io({ transports: ['websocket', 'polling'], withCredentials: true });

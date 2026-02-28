@@ -65,3 +65,16 @@ model GameTemplate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// AIディーラー用の会話ログ
+model ConversationLog {
+  id        String   @id @default(uuid())
+  roomCode  String   // ルームコード (Room.code)
+  userId    String   // 話者のユーザーID（AI側は "DEALER" 等）
+  role      String   // "host" | "guest" | "cpu" | "dealer" など
+  utterance String   // 発話テキスト
+
+  createdAt DateTime @default(now())
+
+  @@index([roomCode, createdAt])
+}
