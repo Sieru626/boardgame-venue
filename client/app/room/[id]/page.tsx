@@ -61,6 +61,7 @@ export default function RoomPage(props: RoomPageProps) {
     const [dealerPanic, setDealerPanic] = useState(false);
     const [dealerSpeech, setDealerSpeech] = useState<string>('ようこそ。新しいゲームの秩序へ。準備はいい？');
     const [dealerThinking, setDealerThinking] = useState(false);
+    const [dealerWorking, setDealerWorking] = useState(false);
 
     const triggerDealerPanic = () => {
         setDealerPanic(true);
@@ -147,10 +148,12 @@ export default function RoomPage(props: RoomPageProps) {
     };
 
     // ディーラーパネルからの入力 → AIディーラー（HTTP）→ ログ&チャットに返答を流す
+    const DEALER_THINKING_MIN_MS = 700;
     const sendDealerMessage = async (text: string) => {
         if (!socket || !text.trim()) return;
 
         const trimmed = text.trim();
+        const thinkingStart = Date.now();
         setDealerThinking(true);
 
         // 1) まずは通常チャットとして全員に見えるように流す
@@ -195,6 +198,26 @@ export default function RoomPage(props: RoomPageProps) {
             if (data.emotion === 'panic') {
                 triggerDealerPanic();
             }
+
+            // 3) フェーズ2: actionCommand が change_mode ならホストとしてゲームモード変更を実行
+            const cmd = data.actionCommand;
+            if (cmd && cmd.type === 'change_mode' && typeof cmd.gameMode === 'string' && cmd.gameMode) {
+                const me = state?.players?.find((p: Player) => p.id === userId);
+                if (me?.isHost) {
+                    setDealerThinking(false);
+                    setDealerWorking(true);
+                    socket.emit('game_action', { roomId, type: 'chat', payload: { message: '【AI Dealer】えっと、会場を準備しています…！' }, userId }, () => {});
+                    socket.emit('host_action', {
+                        roomId,
+                        type: 'change_mode',
+                        payload: { gameMode: String(cmd.gameMode).toLowerCase() },
+                        userId
+                    }, (res: any) => {
+                        setDealerWorking(false);
+                        if (res?.ok === false) console.warn('[AI Dealer] change_mode failed:', res.error);
+                    });
+                }
+            }
         } catch (err) {
             console.error('Dealer AI error', err);
             triggerDealerPanic();
@@ -206,7 +229,10 @@ export default function RoomPage(props: RoomPageProps) {
                 userId
             }, () => {});
         } finally {
-            setDealerThinking(false);
+            const elapsed = Date.now() - thinkingStart;
+            const remain = Math.max(0, DEALER_THINKING_MIN_MS - elapsed);
+            if (remain > 0) setTimeout(() => setDealerThinking(false), remain);
+            else setDealerThinking(false);
         }
     };
 
@@ -253,7 +279,7 @@ export default function RoomPage(props: RoomPageProps) {
     const selectedMode = state.selectedMode || 'tabletop';
 
     return (
-        <div className="flex flex-col h-screen bg-[#111] text-gray-200 overflow-hidden font-sans relative">
+        <div className="flex flex-col h-screen cyber-bg cyber-grid scanlines text-[var(--foreground)] overflow-hidden font-sans relative">
             {reconnecting && (
                 <div className="absolute top-0 left-0 right-0 z-[100] bg-amber-900/95 text-amber-100 py-2 text-center text-sm font-bold shadow-lg">
                     接続が切れました。サーバー再起動後は自動で再接続し、入り直します…
@@ -265,18 +291,18 @@ export default function RoomPage(props: RoomPageProps) {
                 </div>
             )}
 
-            {/* v0 Header */}
-            <header className="flex items-center justify-between px-4 py-2 rpg-border shrink-0" style={{ borderLeft: 'none', borderRight: 'none', borderTop: 'none' }}>
-                <div className="flex items-center gap-3">
-                    <h1 className="text-lg neon-green tracking-widest font-sans">NEW GAME ORDER</h1>
-                    <span className="text-xs text-[var(--muted-foreground)] font-sans hidden md:inline">{"// BOARD GAME VENUE //"}</span>
+            {/* V0 style Header */}
+            <header className="flex items-center justify-between px-5 py-3 neon-panel shrink-0 rounded-none" style={{ borderLeft: 'none', borderRight: 'none', borderTop: 'none' }}>
+                <div className="flex items-center gap-4">
+                    <h1 className="text-lg neon-lime tracking-widest font-sans">NEW GAME ORDER</h1>
+                    <span className="text-xs text-[var(--muted-foreground)] font-sans hidden md:inline opacity-60">{"// BOARD GAME VENUE //"}</span>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 rpg-border-yellow px-3 py-1 rounded">
-                        <span className="text-xs text-[var(--muted-foreground)] font-sans hidden sm:inline">ROOM:</span>
-                        <span className="neon-yellow text-sm tracking-wider font-sans">{String(roomId)}</span>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 neon-panel-amber px-3 py-1.5 rounded-lg">
+                        <span className="text-[10px] text-[var(--muted-foreground)] font-sans hidden sm:inline">ROOM:</span>
+                        <span className="neon-amber text-sm tracking-wider font-sans">{String(roomId)}</span>
                         <button
-                            className="neon-btn-yellow rounded p-0.5"
+                            className="text-[var(--neon-amber)] hover:text-[var(--neon-lime)] transition-all hover:scale-110 p-0.5 rounded"
                             aria-label="Copy room code"
                             onClick={() => {
                                 const url = `${window.location.origin}/room/${roomId}`;
@@ -287,9 +313,9 @@ export default function RoomPage(props: RoomPageProps) {
                             <span className="text-xs">📋</span>
                         </button>
                     </div>
-                    <div className="flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-[var(--neon-green)] block" />
-                        <span className="text-xs neon-green font-sans">ONLINE</span>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[var(--neon-lime)] text-[var(--neon-lime)] block" />
+                        <span className="text-xs neon-lime font-sans">ONLINE</span>
                     </div>
                     {myPlayer && <span className="neon-cyan font-bold text-sm">{String(myPlayer.name)}</span>}
                 </div>
@@ -298,10 +324,11 @@ export default function RoomPage(props: RoomPageProps) {
             {/* v0 Main: Left Dealer | Center Board | Right Info+Chat */}
             <div className="flex flex-1 min-h-0">
                 {/* Left: AI Dealer */}
-                <aside className="w-72 flex-shrink-0 p-3 border-r-2 border-[var(--neon-yellow)]/15 hidden md:flex flex-col">
+                <aside className="w-72 flex-shrink-0 p-3 border-r border-[var(--neon-lime)]/10 hidden md:flex flex-col">
                     <AIDealerPanel
                         isPanic={dealerPanic}
                         isThinking={dealerThinking}
+                        isWorking={dealerWorking}
                         speech={dealerSpeech}
                         onSendMessage={sendDealerMessage}
                         onSetupVenue={isHost ? () => setShowLibrary(true) : undefined}
@@ -310,10 +337,10 @@ export default function RoomPage(props: RoomPageProps) {
 
                 {/* Center: GameSelect + Game Board */}
                 <main className="flex-1 flex flex-col p-4 gap-4 min-w-0 min-h-0 overflow-hidden">
-                    {/* GameSelect bar */}
-                    <div className="rpg-border rounded-lg px-3 py-2.5 flex-shrink-0">
-                        <div className="flex items-center gap-4 flex-wrap">
-                            <span className="text-xs neon-green tracking-[0.2em] font-sans whitespace-nowrap">{">> GAME SELECT"}</span>
+                    {/* GameSelect bar (V0 style) */}
+                    <div className="neon-panel rounded-lg px-4 py-3 flex-shrink-0">
+                        <div className="flex items-center gap-5 flex-wrap">
+                            <span className="text-xs neon-lime tracking-[0.2em] font-sans whitespace-nowrap">{">> GAME SELECT"}</span>
                             <div className="flex gap-2 flex-1 min-w-0 flex-wrap">
                                 {GAMES.map((game) => {
                                     const isSelected = selectedMode === game.id;
@@ -321,10 +348,10 @@ export default function RoomPage(props: RoomPageProps) {
                                         <button
                                             key={game.id}
                                             onClick={() => isHost && setShowLibrary(true)}
-                                            className={`px-3 py-1.5 rounded text-xs font-sans tracking-wide transition-all whitespace-nowrap ${
-                                                isSelected ? 'bg-[var(--neon-green)] text-[#111] font-bold' : 'bg-[var(--secondary)]/60 text-[var(--muted-foreground)] hover:text-[var(--neon-green)] hover:bg-[var(--neon-green)]/10 border border-transparent hover:border-[var(--neon-green)]/40'
+                                            className={`tab-cyber px-4 py-2 rounded-lg text-xs font-sans tracking-wide transition-all whitespace-nowrap ${isSelected ? 'active' : ''} ${
+                                                isSelected ? 'bg-[var(--neon-lime)]/10 border border-[var(--neon-lime)] text-[var(--neon-lime)]' : 'bg-[var(--secondary)]/60 border border-transparent text-[var(--muted-foreground)] hover:text-[var(--neon-lime)] hover:border-[var(--neon-lime)]/30'
                                             } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
-                                            style={isSelected ? { boxShadow: '0 0 12px rgba(0,255,136,0.5), 0 0 30px rgba(0,255,136,0.2)' } : {}}
+                                            style={isSelected ? { boxShadow: '0 0 20px rgba(204,255,0,0.2), inset 0 0 15px rgba(204,255,0,0.05)' } : {}}
                                             title={isHost ? 'クリックでゲームライブラリを開く' : ''}
                                         >
                                             {game.name}
@@ -358,8 +385,8 @@ export default function RoomPage(props: RoomPageProps) {
                     </div>
                 </main>
 
-                {/* Right: v0 Info Panels + Chat */}
-                <aside className="w-80 flex-shrink-0 p-3 border-l-2 border-[var(--neon-cyan)]/15 flex flex-col gap-3 min-h-0 hidden md:flex">
+                {/* Right: V0 Info Panels + Chat */}
+                <aside className="w-80 flex-shrink-0 p-3 border-l border-[var(--neon-cyan)]/10 flex flex-col gap-3 min-h-0 hidden md:flex">
                     <div className="flex-[6] min-h-0">
                         <V0InfoPanels
                             state={state}
@@ -386,19 +413,21 @@ export default function RoomPage(props: RoomPageProps) {
                 </aside>
             </div>
 
-            {/* v0 Status Bar */}
-            <footer className="flex items-center justify-center gap-6 px-4 py-1.5 border-t-2 border-[var(--neon-green)]/20 bg-[var(--card)] shrink-0">
-                <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[var(--neon-green)] block" />
+            {/* V0 Status Bar */}
+            <footer className="flex items-center justify-center gap-8 px-5 py-2 border-t border-[var(--neon-lime)]/15 bg-[var(--card)]/80 backdrop-blur-sm shrink-0">
+                <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[var(--neon-lime)] block" />
                     <span className="text-[10px] text-[var(--muted-foreground)] font-sans tracking-wider">PLAYERS: {state.players.length}</span>
                 </div>
                 <span className="text-[10px] text-[var(--border)] font-sans">|</span>
                 <span className="text-[10px] text-[var(--muted-foreground)] font-sans tracking-wider">{state.phase === 'setup' ? 'LOBBY' : state.phase.toUpperCase()}</span>
                 <span className="text-[10px] text-[var(--border)] font-sans">|</span>
-                <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[var(--neon-green)] block" />
+                <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[var(--neon-lime)] block" />
                     <span className="text-[10px] text-[var(--muted-foreground)] font-sans tracking-wider">DEALER: READY</span>
                 </div>
+                <span className="text-[10px] text-[var(--border)] font-sans">|</span>
+                <span className="text-[10px] text-[var(--muted-foreground)] font-sans tracking-wider">ROOM: {roomId}</span>
             </footer>
 
             {showPostGameEditor && (
@@ -425,11 +454,11 @@ type V0ChatLogProps = {
 
 function V0ChatLog({ chat, msg, setMsg, sendChat, isChatSending, logEndRef }: V0ChatLogProps) {
     return (
-        <div className="rpg-border-cyan rounded-lg p-3 flex flex-col h-full min-h-0">
-            <div className="flex items-center gap-2 mb-2">
+        <div className="neon-panel-cyan rounded-lg p-3 flex flex-col h-full min-h-0">
+            <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                 <span className="text-xs neon-cyan tracking-[0.2em] font-sans">LOG & CHAT</span>
             </div>
-            <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 min-h-0 mb-2 pr-1">
+            <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0 mb-2 pr-1">
                 {chat.map((c: any, i: number) => {
                     const rawSender = c?.sender ?? '';
                     const rawMessage = c?.message ?? '';
@@ -447,28 +476,36 @@ function V0ChatLog({ chat, msg, setMsg, sendChat, isChatSending, logEndRef }: V0
                     let displaySender = String(rawSender);
                     let displayMessage = String(rawMessage);
 
-                    if (typeof rawMessage === 'string' && rawMessage.startsWith('【AI Dealer】')) {
-                        displaySender = 'ディーラーちゃん';
+                    const isAI = typeof rawMessage === 'string' && rawMessage.startsWith('【AI Dealer】');
+                    if (isAI) {
+                        displaySender = 'AI';
                         displayMessage = rawMessage.replace(/^【AI Dealer】/, '').trim();
                     }
 
                     return (
-                        <div key={i} className="text-xs font-sans leading-relaxed text-[var(--foreground)]">
-                            <span className="neon-yellow">{displaySender}</span>: {displayMessage}
+                        <div key={i} className="text-xs font-sans leading-relaxed">
+                            {isAI ? (
+                                <div className="flex gap-2 items-start">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--neon-cyan)]/20 text-[var(--neon-cyan)] font-sans flex-shrink-0">AI</span>
+                                    <span className="neon-cyan">{displayMessage}</span>
+                                </div>
+                            ) : (
+                                <span className="text-[var(--foreground)]"><span className="neon-amber">{displaySender}</span>: {displayMessage}</span>
+                            )}
                         </div>
                     );
                 })}
                 <div ref={logEndRef} />
             </div>
-            <form onSubmit={sendChat} className="flex gap-2">
+            <form onSubmit={sendChat} className="flex gap-2 flex-shrink-0">
                 <input
                     type="text"
                     value={msg}
                     onChange={e => setMsg(e.target.value)}
                     placeholder="メッセージを入力..."
-                    className="flex-1 bg-[var(--input)] border-2 border-[var(--neon-cyan)]/30 rounded px-2 py-1.5 text-xs font-sans text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--neon-cyan)] focus:outline-none transition-all"
+                    className="flex-1 bg-[var(--input)] border border-[var(--neon-cyan)]/30 rounded-lg px-3 py-2 text-xs font-sans text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--neon-cyan)] focus:outline-none focus:shadow-[0_0_15px_rgba(34,211,238,0.15)] transition-all"
                 />
-                <button type="submit" disabled={isChatSending} className="rpg-border-cyan rounded px-2 py-1.5 neon-cyan hover:bg-[var(--neon-cyan)]/10 transition-all disabled:opacity-50">
+                <button type="submit" disabled={isChatSending} className="neon-btn-cyan rounded-lg px-3 py-2 disabled:opacity-50" aria-label="Send message">
                     ➤
                 </button>
             </form>
@@ -550,20 +587,20 @@ function V0InfoPanels({ state, myPlayer, socket, roomId, isHost, userId, onOpenL
         });
     };
 
-    const borderClass = activeTab === 'rule' ? 'rpg-border' : activeTab === 'player' ? 'rpg-border-cyan' : 'rpg-border-yellow';
+    const borderClass = activeTab === 'rule' ? 'neon-panel' : activeTab === 'player' ? 'neon-panel-cyan' : 'neon-panel-amber';
 
     return (
         <div className={`${borderClass} rounded-lg overflow-hidden flex flex-col min-h-0 h-full`}>
-            <div className="flex border-b-2 border-[var(--border)] shrink-0">
+            <div className="flex border-b border-[var(--border)] shrink-0">
                 {(['rule', 'player', 'host'] as const).map((tab) => {
                     const labels = { rule: 'RULE', player: 'PLAYER', host: 'HOST' };
-                    const colors = { rule: 'neon-green', player: 'neon-cyan', host: 'neon-yellow' };
+                    const colors = { rule: 'neon-lime', player: 'neon-cyan', host: 'neon-amber' };
                     const isActive = activeTab === tab;
                     return (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
-                            className={`flex-1 py-2.5 px-3 text-xs font-sans transition-all ${isActive ? `${colors[tab]} bg-[var(--${tab === 'rule' ? 'neon-green' : tab === 'player' ? 'neon-cyan' : 'neon-yellow'})]/10` : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'}`}
+                            className={`tab-cyber flex-1 py-2.5 px-3 text-xs font-sans transition-all relative ${isActive && tab === 'rule' ? 'active neon-lime bg-[var(--neon-lime)]/10' : ''} ${isActive && tab === 'player' ? 'active neon-cyan bg-[var(--neon-cyan)]/10' : ''} ${isActive && tab === 'host' ? 'active neon-amber bg-[var(--neon-amber)]/10' : ''} ${!isActive ? 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]' : ''}`}
                         >
                             {labels[tab]}
                         </button>
@@ -576,21 +613,21 @@ function V0InfoPanels({ state, myPlayer, socket, roomId, isHost, userId, onOpenL
                 )}
                 {activeTab === 'player' && (
                     <div className="flex flex-col gap-3">
-                        <div className="flex items-center justify_between">
+                        <div className="flex items-center justify-between">
                             <span className="text-sm neon-cyan font-sans">{">> PLAYERS"}</span>
-                            <span className="text-[10px] rpg-border-cyan rounded px-2 py-0.5 neon-cyan font-sans">{state.players.length}/6</span>
+                            <span className="text-[10px] neon-panel-cyan rounded px-2 py-0.5 neon-cyan font-sans">{state.players.length}/6</span>
                         </div>
                         {myPlayer && (
-                            <div className="rpg-border-cyan rounded-lg p-3">
+                            <div className="neon-panel-cyan rounded-lg p-3">
                                 <div className="text-sm neon-cyan font-sans">{myPlayer.name}</div>
                                 <div className="text-[10px] text-[var(--muted-foreground)]">{isHost ? 'HOST' : 'PLAYER'}</div>
-                                <div className="text-xs mt-2">手札: <span className="neon-green font-bold">{myPlayer.hand?.length ?? 0}</span></div>
+                                <div className="text-xs mt-2">手札: <span className="neon-lime font-bold">{myPlayer.hand?.length ?? 0}</span></div>
                             </div>
                         )}
                         {state.players.filter(p => p.id !== userId).map((p) => (
                             <div key={p.id} className="flex justify-between px-3 py-2 rounded-lg bg-[var(--secondary)]/50">
                                 <span className="text-xs">{p.name}</span>
-                                <span className={`text-[10px] ${p.status === 'online' ? 'neon-green' : 'text-[var(--muted-foreground)]'}`}>{p.status}</span>
+                                <span className={`text-[10px] ${p.status === 'online' ? 'neon-lime' : 'text-[var(--muted-foreground)]'}`}>{p.status}</span>
                             </div>
                         ))}
                     </div>
@@ -598,19 +635,19 @@ function V0InfoPanels({ state, myPlayer, socket, roomId, isHost, userId, onOpenL
                 {activeTab === 'host' && isHost && (
                     <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between">
-                            <span className="text-sm neon-yellow font-sans">{">> HOST COMMANDS"}</span>
-                            <span className="text-[10px] rpg-border-yellow rounded px-2 py-0.5 neon-yellow font-sans">ADMIN</span>
+                            <span className="text-sm neon-amber font-sans">{">> HOST COMMANDS"}</span>
+                            <span className="text-[10px] neon-panel-amber rounded px-2 py-0.5 neon-amber font-sans">ADMIN</span>
                         </div>
 
                         <button
                             onClick={() => handleHostAction('start_game', {}, '現在の設定でゲームを開始しますか？')}
-                            className="w-full rpg-command rounded-lg px-3 py-2.5 border-2 border-[var(--neon-green)] text-left hover:bg-[var(--neon-green)]/10 transition-all"
+                            className="w-full rounded-lg px-3 py-2.5 text-left border border-[var(--neon-lime)] hover:bg-[var(--neon-lime)]/10 transition-all neon-btn"
                         >
-                            <span className="text-sm neon-green">▶ ゲームをはじめる</span>
+                            <span className="text-sm neon-lime">▶ ゲームをはじめる</span>
                             <div className="text-[9px] text-[var(--muted-foreground)]">START → SELECTED GAME MODE</div>
                         </button>
 
-                        <button onClick={onOpenEditor} className="w-full rpg-command rounded-lg px-3 py-2.5 border-2 border-[var(--border)] text-left hover:border-[var(--neon-cyan)] hover:bg-[var(--neon-cyan)]/10 transition-all">
+                        <button onClick={onOpenEditor} className="w-full rounded-lg px-3 py-2.5 text-left border border-[var(--border)] hover:border-[var(--neon-cyan)] hover:bg-[var(--neon-cyan)]/10 transition-all neon-btn-cyan">
                             <span className="text-sm neon-cyan">🃏 デッキを編集</span>
                             <div className="text-[9px] text-[var(--muted-foreground)]">AFTER MATCH → DECK EDITOR</div>
                         </button>
@@ -619,21 +656,24 @@ function V0InfoPanels({ state, myPlayer, socket, roomId, isHost, userId, onOpenL
                             <span className="text-[10px] neon-cyan font-sans tracking-wider">{">> ADD CPU"}</span>
                             <div className="flex gap-2">
                                 <button
-                                    className="flex-1 rpg-chip px-2 py-1 rounded text-[10px] font-sans"
+                                    type="button"
+                                    className="flex-1 rounded px-2 py-1.5 text-[10px] font-sans border border-[var(--neon-cyan)]/50 hover:bg-[var(--neon-cyan)]/10 text-[var(--neon-cyan)] transition-all disabled:opacity-50"
                                     disabled={!addBotSupported}
                                     onClick={() => handleAddBot('weak')}
                                 >
                                     CPU 弱
                                 </button>
                                 <button
-                                    className="flex-1 rpg-chip px-2 py-1 rounded text-[10px] font-sans"
+                                    type="button"
+                                    className="flex-1 rounded px-2 py-1.5 text-[10px] font-sans border border-[var(--neon-cyan)]/50 hover:bg-[var(--neon-cyan)]/10 text-[var(--neon-cyan)] transition-all disabled:opacity-50"
                                     disabled={!addBotSupported}
                                     onClick={() => handleAddBot('normal')}
                                 >
                                     CPU 普通
                                 </button>
                                 <button
-                                    className="flex-1 rpg-chip px-2 py-1 rounded text-[10px] font-sans"
+                                    type="button"
+                                    className="flex-1 rounded px-2 py-1.5 text-[10px] font-sans border border-[var(--neon-cyan)]/50 hover:bg-[var(--neon-cyan)]/10 text-[var(--neon-cyan)] transition-all disabled:opacity-50"
                                     disabled={!addBotSupported}
                                     onClick={() => handleAddBot('strong')}
                                 >
@@ -647,7 +687,7 @@ function V0InfoPanels({ state, myPlayer, socket, roomId, isHost, userId, onOpenL
 
                         <button
                             onClick={() => handleHostAction('reset_game', {}, '現在のゲームをリセットしますか？')}
-                            className="w-full rpg-command rounded-lg px-3 py-2.5 border-2 border-[var(--destructive)] text-left hover:bg-[var(--destructive)]/10 transition-all"
+                            className="w-full rounded-lg px-3 py-2.5 text-left border border-[var(--neon-red)] hover:bg-[var(--neon-red)]/10 transition-all neon-btn-red"
                         >
                             <span className="text-sm neon-red">■ ゲームをリセットする</span>
                             <div className="text-[9px] text-[var(--muted-foreground)]">RESET → BACK TO LOBBY</div>

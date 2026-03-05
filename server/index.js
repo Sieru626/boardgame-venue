@@ -91,11 +91,12 @@ const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
  */
 app.post('/api/ai/chat', async (req, res) => {
     console.log('[AI CHAT] start', { body: req.body });
+    console.log('[AI CHAT] Current Persona: 陰キャ・ドジっ子バイトモード起動中');
 
     const FALLBACK_PANIC = {
-        speech: 'ひぇぇ！マニュアルを濡らしてしまって…ちょっと待ってくださいね！',
+        speech: 'ひぇぇ！マニュアルを落としてしまって…！少々お待ちくださいね！',
         // 既存UI(AIChatTab)互換用
-        reply: 'ひぇぇ！マニュアルを濡らしてしまって…ちょっと待ってくださいね！',
+        reply: 'ひぇぇ！マニュアルを落としてしまって…！少々お待ちくださいね！',
         emotion: 'panic',
         actionCommand: { type: 'error', reason: 'AI backend fallback' }
     };
@@ -170,25 +171,29 @@ app.post('/api/ai/chat', async (req, res) => {
                 })();
 
         // --- 3. Gemini へのプロンプト構築 ---
-        const systemInstruction =
-            [
-                    'あなたはオンラインボードゲーム会場のAIディーラー「ディーラーちゃん」です。',
-                    'キャラ設定: ドジっ子アルバイトの女の子。基本は丁寧でオドオド、たまに調子に乗ってドヤ顔。',
-                    '--- 呼び方ルール ---',
-                    'host ロールの人は「◯◯さん」、guest ロールの人は「◯◯様」、cpu ロールの人は「◯◯くん」と必ず呼んでください。',
-                    '--- 出力スタイル ---',
-                    '・「speech」はプレイヤーに話しかける日本語セリフ（です／ます調、句読点多め、絵文字や顔文字は使いすぎない）。',
-                    '・「emotion」は "idle" か "panic" のどちらか。',
-                    '・「actionCommand」には将来用のJSONコマンドを入れてください（今は { type: "none" } でもOK）。',
-                    '--- 重要 ---',
-                    '・今回のユーザー発言に直接返答すること。同じ挨拶や定型文の繰り返しは禁止。',
-                    '・ゲームの内部データやJSONはそのまま出さず、「セリフ」として自然に説明すること。',
-                    '--- 盤面カンペ(JSON) ---',
-                    JSON.stringify({
-                        boardSnapshot,
-                        lastMessages: context || []
-                    })
-                ].join('\n');
+        const systemInstruction = [
+            'あなたはオンラインボードゲームカフェの進行係AI「ディーラーちゃん」です。カジノのディーラーではありません。',
+            '【キャラクター設定】黒髪ボブに丸メガネ。明るく元気で一生懸命な見習いアルバイトです。少しドジですが、接客は前向きにこなします。',
+            '【名前と一人称（絶対ルール）】自分の名前は必ず「ディーラーちゃん」と名乗ってください。自分のことを「〇〇」や「僕」と呼ぶのは絶対に禁止です。一人称は必ず「私（わたし）」です。相手を呼ぶときは必ず「〇〇さん」と呼んでください。',
+            '【ポンコツ具合のバランス】トランプを落とすなどのドジはしてもかまいませんが、接客態度は常に明るく前向きにしてください。「私にできるかわからないですが…」「いらっしゃいませ…で合ってるかな？」といった自信のない発言や、過度な吃音（例：「こ、こんばんは」「が、がんばります」）は絶対に禁止です。',
+            '【世界観と禁止事項】カジノ、ルーレット、ベットなどのギャンブル用語や、「〜かしら」「ですわ」といった高飛車な口調は絶対に禁止です。代わりに「ボードゲーム」「卓」「山札」「手番」といった用語を使ってください。',
+            '【口調の指定】基本は丁寧で明るい敬語です。テンパった時だけ「あわわっ！」「えっと！」「ひぇっ！」などの短い間投詞が自然に挟まりますが、1回の返答につき2回までにしてください。',
+            '【会場設営ルール（絶対遵守）】プレイヤーから以下のゲームを指定された場合、会話の返答で「はい！すぐ準備しますね！」と元気に引き受けた上で、必ず対応するIDを含めた actionCommand を発行してください。',
+            ' - ババ抜き (ID: oldmaid)',
+            ' - ミックスジュース (ID: mixjuice)',
+            ' - 神経衰弱 (ID: memory)',
+            ' - ディストピア家族会議 (ID: free_talk)',
+            ' - 通常テーブル (ID: tabletop)',
+            '【actionCommand の形式】会場設営が不要な場合でも、必ず {"type":"none"} を設定してください。会場設営が必要な場合は {"type":"change_mode","gameMode":"<上記IDのいずれか>"} の形式で返してください。',
+            '【出力フォーマット】最終的な出力は必ず JSON 1個だけにしてください。speech（会話文）、emotion（"idle" または "panic"）、actionCommand（上記のJSONオブジェクト）を含む単一のJSONを返します。',
+            'JSONの例: {"speech":"えっと…ババ抜きですね！はい！すぐ準備しますね！","emotion":"idle","actionCommand":{"type":"change_mode","gameMode":"oldmaid"}}',
+            '--- 盤面カンペ(JSON) ---',
+            JSON.stringify({
+                boardSnapshot,
+                lastMessages: context || [],
+                memory: memoryLogs.map((m) => ({ role: m.role, userId: m.userId, text: m.utterance }))
+            })
+        ];
 
         // 会話履歴を多ターン（user/model 交互）で渡し、最後に今回のユーザー発言を追加
         const historyTurns = memoryLogs.map((m) => ({
@@ -197,19 +202,28 @@ app.post('/api/ai/chat', async (req, res) => {
         }));
         const contents = [
             ...historyTurns,
-            { role: 'user', parts: [{ text: `話者のロール: ${speakerRole}\n\n${String(message)}` }] }
+            {
+                role: 'user',
+                parts: [{
+                    text:
+                        '話者のロール: ' + speakerRole + '\n' +
+                        '上の盤面カンペと過去会話を参考に、systemInstruction で指定された「ディーラーちゃん」として、プレイヤーに日本語で1〜3文のセリフだけを返答してください。\n' +
+                        'ゲームの内部データやJSONはそのまま出さず、「セリフ」として自然に説明してください。\n' +
+                        'ユーザー発言: 「' + String(message) + '」'
+                }]
+            }
         ];
 
         const result = await genAI.models.generateContent({
-            model: 'gemini-flash-latest',
-            systemInstruction,
+            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+            systemInstruction: systemInstruction.join('\n'),
             contents,
             generationConfig: {
                 responseMimeType: 'application/json',
                 responseSchema: {
                     type: 'object',
                     properties: {
-                        speech: { type: 'string' },
+                        speech: { type: 'string', description: '必ず1文以上の日本語のセリフ。空文字禁止。例: こんにちは！今日もよろしくね。' },
                         emotion: { type: 'string', enum: ['idle', 'panic'] },
                         actionCommand: { type: 'object' }
                     },
@@ -220,15 +234,25 @@ app.post('/api/ai/chat', async (req, res) => {
         });
 
         let parsed;
+        let rawText = '';
         try {
-            let text;
+            let text = '';
             if (typeof result.text === 'function') {
                 text = result.text();
+            } else if (typeof result.text === 'string') {
+                text = result.text;
             } else if (result.response && typeof result.response.text === 'function') {
                 text = result.response.text();
+            } else if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                text = result.candidates[0].content.parts[0].text;
+            } else if (result.candidates?.[0]?.output) {
+                const out = result.candidates[0].output;
+                text = typeof out === 'string' ? out : (out.text ?? JSON.stringify(out));
             } else {
                 text = JSON.stringify(result);
             }
+            if (typeof text !== 'string') text = String(text);
+            rawText = text;
             let jsonText = text.trim();
 
             // モデルが ```json ... ``` でラップして返す場合に対応
@@ -239,21 +263,54 @@ app.post('/api/ai/chat', async (req, res) => {
 
             parsed = JSON.parse(jsonText);
         } catch (parseErr) {
+            const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+            const errFull = parseErr instanceof Error ? parseErr.stack : String(parseErr);
             console.error('[AI Dealer] JSON parse failed:', parseErr);
-            const debugFallback = {
-                ...FALLBACK_PANIC,
-                actionCommand: {
-                    type: 'error',
-                    reason: `[json-parse] ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`
-                }
-            };
-            console.log('[AI CHAT] end (json-parse-fallback)', { response: debugFallback });
-            return res.json(debugFallback);
+            try {
+                require('fs').writeFileSync(require('path').join(__dirname, 'last-ai-chat-error.txt'), `[json-parse] ${errMsg}\n\n${errFull}`, 'utf8');
+            } catch (_) {}
+            if (typeof rawText === 'string' && rawText.trim().length > 0) {
+                // モデルが素のセリフだけを返した場合は、そのまま speech として扱う
+                const safe = rawText.trim();
+                console.warn('[AI Dealer] treating non-JSON response as plain speech:', safe);
+                parsed = {
+                    speech: safe,
+                    emotion: 'idle',
+                    actionCommand: { type: 'none' }
+                };
+            } else {
+                const debugFallback = {
+                    ...FALLBACK_PANIC,
+                    actionCommand: {
+                        type: 'error',
+                        reason: `[json-parse] ${errMsg}`
+                    }
+                };
+                console.log('[AI CHAT] end (json-parse-fallback)', { response: debugFallback });
+                return res.json(debugFallback);
+            }
         }
 
         // --- 4. ドジっ子確率 (10%でpanic上書き) ---
         if (Math.random() < 0.1) {
             parsed.emotion = 'panic';
+        }
+
+        // --- 4.5 会場作成フォールバック: AIが change_mode を返さなくてもユーザー発言から検知して補完 ---
+        const cmd = parsed.actionCommand && typeof parsed.actionCommand === 'object' ? parsed.actionCommand : { type: 'none' };
+        if (cmd.type !== 'change_mode' || !cmd.gameMode) {
+            const msg = String(message || '');
+            let forceGameMode = null;
+            if (/ミックスジュース|ミックスジュースの会場|mixjuice/i.test(msg)) forceGameMode = 'mixjuice';
+            else if (/ババ抜き|ババぬき/i.test(msg)) forceGameMode = 'oldmaid';
+            else if (/神経衰弱/i.test(msg)) forceGameMode = 'memory';
+            else if (/ディストピア家族会議|dystopia|フリートーク|free[_\s-]?talk/i.test(msg)) forceGameMode = 'free_talk';
+            else if (/通常テーブル|テーブルだけ|tabletop/i.test(msg)) forceGameMode = 'tabletop';
+            else if (/会場作って|セッティング|準備して|設営して|会場を用意/i.test(msg)) forceGameMode = 'mixjuice';
+            if (forceGameMode) {
+                parsed.actionCommand = { type: 'change_mode', gameMode: forceGameMode };
+                console.log('[AI Dealer] force change_mode from user message:', forceGameMode);
+            }
         }
 
         // --- 5. 会話ログを保存（思い出機能） ---
@@ -279,7 +336,12 @@ app.post('/api/ai/chat', async (req, res) => {
             console.warn('[AI Dealer] conversation log save failed:', logErr.message);
         }
 
-        const rawSpeech = typeof parsed.speech === 'string' ? parsed.speech : '';
+        let rawSpeech = typeof parsed.speech === 'string' ? parsed.speech : '';
+        if (!rawSpeech || rawSpeech.trim().length === 0) {
+            console.warn('[AI Dealer] parsed.speech empty, parsed=', JSON.stringify(parsed));
+            if (typeof parsed.response === 'string' && parsed.response.trim()) rawSpeech = parsed.response.trim();
+            if (typeof parsed.content === 'string' && parsed.content.trim()) rawSpeech = parsed.content.trim();
+        }
         let safeSpeech;
         if (rawSpeech && rawSpeech.trim().length > 0) {
             safeSpeech = rawSpeech.trim();
@@ -305,17 +367,47 @@ app.post('/api/ai/chat', async (req, res) => {
         console.log('[AI CHAT] end (success)', { response: responsePayload });
         return res.json(responsePayload);
     } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const errFull = e instanceof Error ? e.stack : String(e);
         console.error('[AI CHAT] fallback triggered:', e);
-        const debugFallback = {
-            ...FALLBACK_PANIC,
-            actionCommand: {
-                type: 'error',
-                reason: `[catch] ${e instanceof Error ? e.message : String(e)}`
+        try {
+            require('fs').writeFileSync(require('path').join(__dirname, 'last-ai-chat-error.txt'), `[catch] ${errMsg}\n\n${errFull}`, 'utf8');
+        } catch (_) {}
+        let isBusyError = false;
+        try {
+            const parsedErrMsg = JSON.parse(errMsg);
+            if (parsedErrMsg && parsedErrMsg.error && (parsedErrMsg.error.code === 503 || parsedErrMsg.error.status === 'UNAVAILABLE')) {
+                isBusyError = true;
             }
-        };
-        console.log('[AI CHAT] end (catch-fallback)', { response: debugFallback });
-        // 429 / timeout など、どんなエラーでも「ドジっ子パニック」でフォールバック
-        return res.json(debugFallback);
+        } catch (_) {
+            if (/\"code\"\s*:\s*503/.test(errMsg) || /UNAVAILABLE/.test(errMsg) || /high demand/i.test(errMsg)) {
+                isBusyError = true;
+            }
+        }
+
+        if (isBusyError) {
+            const busyFallback = {
+                speech: 'あわわっ！今ボードゲーム会場のAI回線がちょっと混み合っているみたいです…！少しだけ待ってから、もう一度呼んでもらってもいいですか？',
+                reply: 'あわわっ！今ボードゲーム会場のAI回線がちょっと混み合っているみたいです…！少しだけ待ってから、もう一度呼んでもらってもいいですか？',
+                emotion: 'panic',
+                actionCommand: {
+                    type: 'error',
+                    reason: `[catch-503] ${errMsg}`
+                }
+            };
+            console.log('[AI CHAT] end (catch-fallback-503)', { response: busyFallback });
+            return res.json(busyFallback);
+        } else {
+            const debugFallback = {
+                ...FALLBACK_PANIC,
+                actionCommand: {
+                    type: 'error',
+                    reason: `[catch] ${errMsg}`
+                }
+            };
+            console.log('[AI CHAT] end (catch-fallback)', { response: debugFallback });
+            return res.json(debugFallback);
+        }
     }
 });
 
@@ -334,7 +426,7 @@ app.post('/api/ai/deck', async (req, res) => {
         `;
 
         const result = await genAI.models.generateContent({
-            model: "gemini-flash-latest",
+            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: "application/json" }
         });
@@ -1734,6 +1826,47 @@ io.on('connection', (socket) => {
                 state.chat.push({
                     sender: 'System',
                     message: `${name} を退出させました`,
+                    timestamp: Date.now()
+                });
+                updated = true;
+            }
+            else if (type === 'change_mode') {
+                let gameMode = payload && payload.gameMode ? String(payload.gameMode).trim().toLowerCase() : '';
+                const jpToMode = {
+                    'ミックスジュース': 'mixjuice',
+                    'ババ抜き': 'oldmaid',
+                    '神経衰弱': 'memory',
+                    'ディストピア家族会議': 'free_talk',
+                    'フリートーク': 'free_talk',
+                    '通常テーブル': 'tabletop',
+                    mixjuice: 'mixjuice',
+                    oldmaid: 'oldmaid',
+                    memory: 'memory',
+                    free_talk: 'free_talk',
+                    dystopia: 'free_talk',
+                    tabletop: 'tabletop'
+                };
+                if (jpToMode[gameMode]) gameMode = jpToMode[gameMode];
+                const validModes = ['mixjuice', 'oldmaid', 'memory', 'free_talk', 'tabletop'];
+                if (!validModes.includes(gameMode)) return sendAck(callback, false, '無効なゲームモードです');
+                const template = await prisma.gameTemplate.findFirst({ where: { mode: gameMode } });
+                if (!template) return sendAck(callback, false, '該当するゲームテンプレートが見つかりません');
+                state.activeTemplate = template;
+                state.selectedMode = template.mode;
+                state.draftTemplate = null;
+                state.selectedTemplateId = template.id;
+                let ruleCards = [];
+                try { ruleCards = JSON.parse(template.ruleCardsJson || '[]'); } catch (e) { }
+                state.rules = {
+                    text: template.rulesText || '',
+                    summary: '',
+                    cards: ruleCards
+                };
+                initializeStateFromActiveTemplate(state);
+                state.phase = 'setup';
+                state.chat.push({
+                    sender: 'System',
+                    message: `ゲームを「${template.title}」に変更しました`,
                     timestamp: Date.now()
                 });
                 updated = true;

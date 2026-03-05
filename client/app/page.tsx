@@ -102,61 +102,50 @@ function HomeContent() {
   const canCreateRoom = isConnected && socket && !creating;
 
   return (
-    <main className="min-h-screen bg-black text-white font-dotgothic flex flex-col items-center justify-center p-4 overflow-hidden">
-      {/* CRT風スキャンライン効果 */}
-      <div className="fixed inset-0 pointer-events-none z-0 opacity-[0.03]" aria-hidden="true">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.35) 2px, rgba(0,0,0,0.35) 4px)',
-          }}
-        />
-      </div>
-
+    <main className="min-h-screen cyber-bg cyber-grid scanlines text-[var(--foreground)] font-dotgothic flex flex-col items-center justify-center p-4 overflow-hidden">
       <div className="relative z-10 w-full max-w-3xl flex flex-col items-center">
-        {/* ロゴ */}
+        {/* ロゴ (V0: neon-lime) */}
         <header className="text-center mb-2">
-          <h1 className="text-3xl md:text-4xl font-bold text-[#FFD700] drop-shadow-[0_0_16px_rgba(255,215,0,0.7)] tracking-[0.2em]">
+          <h1 className="text-3xl md:text-4xl font-bold neon-lime tracking-[0.2em]">
             NEW GAME ORDER
           </h1>
-          <p className="text-xs md:text-sm text-white/80 mt-1 tracking-[0.3em]">
+          <p className="text-xs md:text-sm text-[var(--muted-foreground)] mt-1 tracking-[0.3em]">
             // BOARD GAME VENUE //
           </p>
         </header>
 
-        {/* サーバー状態・エラー（コンパクト表示） */}
+        {/* サーバー状態・エラー */}
         {connectionError ? (
-          <div className="mb-2 w-full max-w-md bg-red-950/80 border border-red-500 rounded px-3 py-2 text-[11px] leading-snug">
-            <div className="font-bold text-red-300 mb-1">⚠ サーバーに接続できません</div>
-            <p className="text-gray-200">
+          <div className="mb-2 w-full max-w-md neon-panel-red rounded-lg px-3 py-2 text-[11px] leading-snug">
+            <div className="font-bold neon-red mb-1">⚠ サーバーに接続できません</div>
+            <p className="text-[var(--foreground)]">
               サーバーが起動しているか確認し、ダメな場合は STOP-ALL.cmd → start-all.bat を試してください。
             </p>
             <button
+              type="button"
               onClick={reloadPage}
-              className="mt-2 w-full bg-red-700 hover:bg-red-600 text-white font-bold py-1.5 rounded text-xs"
+              className="mt-2 w-full neon-btn-red rounded-lg py-1.5 text-xs font-sans"
             >
               再読み込み (Retry)
             </button>
           </div>
         ) : (
-          <div className="mb-1 text-[11px] text-white/60 tracking-[0.2em]">
+          <div className="mb-1 text-[11px] text-[var(--muted-foreground)] tracking-[0.2em]">
             サーバー状態：
-            {loading ? <span className="text-amber-400">接続中...</span> : <span className="text-emerald-400">● ONLINE</span>}
+            {loading ? <span className="neon-amber">接続中...</span> : <span className="neon-lime">● ONLINE</span>}
           </div>
         )}
 
         {/* 招待コードバナー */}
         {inviteCode && (
-          <div className="mb-2 px-3 py-2 bg-amber-950/70 border border-amber-500 rounded text-center text-xs tracking-[0.2em]">
-            <div className="text-amber-300 font-bold">INVITED ROOM</div>
-            <div className="mt-1 text-lg font-mono text-[#FFD700]">{typeof inviteCode === 'string' ? inviteCode : ''}</div>
+          <div className="mb-2 px-3 py-2 neon-panel-amber rounded-lg text-center text-xs tracking-[0.2em]">
+            <div className="neon-amber font-bold">INVITED ROOM</div>
+            <div className="mt-1 text-lg font-mono neon-amber">{typeof inviteCode === 'string' ? inviteCode : ''}</div>
           </div>
         )}
 
-        {/* ディーラー + 吹き出し + パネル一体構造（demo と同一デザイン） */}
+        {/* ディーラー + 吹き出し + パネル */}
         <div className="relative w-full mt-2">
-          {/* ディーラーと吹き出し */}
           <div className="relative w-full flex flex-col items-center mb-[-32px] z-10">
             <img
               src="/dealer.png"
@@ -164,76 +153,69 @@ function HomeContent() {
               className="w-64 h-64 object-contain relative z-10"
               style={{ imageRendering: 'pixelated' }}
             />
-            <div className="relative mt-[-60px] z-20 bg-[#1a1a1a] border-4 border-gray-200 p-4 min-w-[280px] md:min-w-[340px] text-center rounded-sm shadow-[0_0_0_4px_#000,inset_0_0_0_2px_#000]">
-              <p className="text-base md:text-lg leading-relaxed text-white">
+            <div className="relative mt-[-60px] z-20 neon-panel rounded-lg p-4 min-w-[280px] md:min-w-[340px] text-center">
+              <p className="text-base md:text-lg leading-relaxed text-[var(--foreground)]">
                 ようこそ。新しいゲームの秩序へ。<br />
                 準備はいい？
               </p>
-              <div className="absolute bottom-2 right-2 w-0 h-0 border-l-[6px] border-l-transparent border-t-[8px] border-t-white border-r-[6px] border-r-transparent animate-bounce" aria-hidden="true" />
             </div>
           </div>
 
-          {/* テーブル兼コントロールパネル */}
-          <div className="relative w-full border-4 border-yellow-700/90 rounded-2xl bg-gray-900/95 pt-10 pb-4 px-3 md:px-6 shadow-[0_0_32px_rgba(0,0,0,0.9)]">
+          {/* テーブル兼コントロールパネル (V0: neon-panel) */}
+          <div className="relative w-full neon-panel-amber rounded-2xl pt-10 pb-4 px-3 md:px-6">
             <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* 左：ホスト */}
-              <div className="border-4 border-emerald-500 border-double rounded-xl bg-black/80 px-3 py-3 flex flex-col gap-2 shadow-[0_0_18px_rgba(16,185,129,0.45)]">
-                <div className="flex items-center gap-2 text-emerald-300 text-xs md:text-sm font-bold tracking-[0.25em]">
+              <div className="neon-panel rounded-xl px-3 py-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2 neon-lime text-xs md:text-sm font-bold tracking-[0.25em]">
                   <span className="text-xl md:text-2xl">👑</span>
                   <span>ホスト</span>
                 </div>
-                <p className="text-[11px] md:text-xs text-emerald-100/80 tracking-wide">
-                  ホスト
-                </p>
+                <p className="text-[11px] md:text-xs text-[var(--muted-foreground)] tracking-wide">ホスト</p>
                 <div className="mt-1 flex flex-col gap-1.5">
-                  <span className="text-[11px] text-emerald-200/90 tracking-[0.18em]">ニックネーム</span>
-                  <div className="relative h-8 md:h-9 bg-black border-2 border-emerald-500/70 rounded-sm flex items-center px-2 text-xs md:text-sm">
+                  <span className="text-[11px] text-[var(--muted-foreground)] tracking-[0.18em]">ニックネーム</span>
+                  <div className="relative h-8 md:h-9 bg-[var(--input)] border border-[var(--neon-lime)]/30 rounded-lg flex items-center px-2 text-xs md:text-sm">
                     <input
                       type="text"
                       value={typeof nickname === 'string' ? nickname : ''}
                       onChange={(e) => setNickname(e.target.value)}
                       placeholder="NAME"
-                      className="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                      className="w-full bg-transparent text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none"
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={handleCreateRoom}
                     disabled={!canCreateRoom}
-                    className="mt-2 h-9 md:h-10 rounded-sm bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold text-xs md:text-sm tracking-[0.25em] shadow-[0_0_14px_rgba(16,185,129,0.6)]"
+                    className="mt-2 h-9 md:h-10 rounded-lg font-bold text-xs md:text-sm tracking-[0.25em] neon-btn disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {creating
-                      ? 'CREATING...'
-                      : !isConnected
-                        ? 'CONNECTING...'
-                        : '部屋を作る'}
+                    {creating ? 'CREATING...' : !isConnected ? 'CONNECTING...' : '部屋を作る'}
                   </button>
                 </div>
               </div>
 
               {/* 右：ゲスト */}
-              <div className="border-4 border-yellow-500 border-double rounded-xl bg-black/80 px-3 py-3 flex flex-col gap-2 shadow-[0_0_18px_rgba(245,158,11,0.5)]">
-                <div className="flex items-center gap-2 text-yellow-300 text-xs md:text-sm font-bold tracking-[0.25em]">
+              <div className="neon-panel-amber rounded-xl px-3 py-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2 neon-amber text-xs md:text-sm font-bold tracking-[0.25em]">
                   <span className="text-xl md:text-2xl">🔑</span>
                   <span>ゲスト</span>
                 </div>
-                <p className="text-[11px] md:text-xs text-yellow-100/80 tracking-wide">
-                  ゲスト
-                </p>
+                <p className="text-[11px] md:text-xs text-[var(--muted-foreground)] tracking-wide">ゲスト</p>
                 <div className="mt-1 flex flex-col gap-1.5">
-                  <span className="text-[11px] text-yellow-200/90 tracking-[0.18em]">部屋コード</span>
-                  <div className="relative h-8 md:h-9 bg-black border-2 border-yellow-500/70 rounded-sm flex items-center px-2 text-xs md:text-sm">
+                  <span className="text-[11px] text-[var(--muted-foreground)] tracking-[0.18em]">部屋コード</span>
+                  <div className="relative h-8 md:h-9 bg-[var(--input)] border border-[var(--neon-amber)]/30 rounded-lg flex items-center px-2 text-xs md:text-sm">
                     <input
                       type="text"
                       value={typeof roomCode === 'string' ? roomCode : ''}
                       onChange={(e) => setRoomCode(e.target.value)}
                       placeholder={typeof inviteCode === 'string' && inviteCode ? inviteCode : 'ROOM CODE'}
                       readOnly={!!inviteCode}
-                      className="w-full bg-transparent text-white placeholder-gray-500 focus:outline-none"
+                      className="w-full bg-transparent text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none"
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={handleJoinRoom}
-                    className="mt-2 h-9 md:h-10 rounded-sm bg-[#FFD700] hover:bg-amber-300 text-black font-bold text-xs md:text-sm tracking-[0.25em] shadow-[0_0_14px_rgba(255,215,0,0.6)]"
+                    className="mt-2 h-9 md:h-10 rounded-lg font-bold text-xs md:text-sm tracking-[0.25em] neon-btn-amber"
                   >
                     参加する
                   </button>
@@ -243,8 +225,7 @@ function HomeContent() {
           </div>
         </div>
 
-        {/* フッターHUD */}
-        <footer className="mt-3 text-[11px] text-white/60 tracking-[0.25em]">
+        <footer className="mt-3 text-[11px] text-[var(--muted-foreground)] tracking-[0.25em]">
           ● PLAYERS: -- LOBBY ● DEALER: READY
         </footer>
       </div>
@@ -256,7 +237,7 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-black text-[#FFD700] font-dotgothic flex items-center justify-center">
+        <div className="min-h-screen cyber-bg text-[var(--foreground)] font-dotgothic flex items-center justify-center neon-lime">
           読み込み中...
         </div>
       }

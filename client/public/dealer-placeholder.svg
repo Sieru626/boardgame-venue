@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#CCFF00;stop-opacity:0.25"/>
+      <stop offset="100%" style="stop-color:#22D3EE;stop-opacity:0.08"/>
+    </linearGradient>
+    <linearGradient id="hair" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2d1f1f"/>
+      <stop offset="100%" style="stop-color:#1a1212"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f5d0c5"/>
+      <stop offset="100%" style="stop-color:#e8b4a8"/>
+    </linearGradient>
+  </defs>
+  <!-- ?? -->
+  <rect width="128" height="128" rx="12" fill="url(#bg)" stroke="rgba(204,255,0,0.45)" stroke-width="2"/>
+  <rect width="128" height="128" rx="12" fill="url(#glow)"/>
+  <!-- ????????????? -->
+  <ellipse cx="64" cy="38" rx="42" ry="28" fill="url(#hair)"/>
+  <path d="M 28 42 Q 24 58 30 72 Q 40 78 64 76 Q 88 78 98 72 Q 104 58 100 42" fill="url(#hair)"/>
+  <!-- ? -->
+  <ellipse cx="64" cy="58" rx="28" ry="32" fill="url(#skin)"/>
+  <!-- ? -->
+  <ellipse cx="54" cy="54" rx="4" ry="5" fill="#1a0a0a"/>
+  <ellipse cx="74" cy="54" rx="4" ry="5" fill="#1a0a0a"/>
+  <circle cx="55" cy="53" r="1" fill="#fff" opacity="0.8"/>
+  <circle cx="75" cy="53" r="1" fill="#fff" opacity="0.8"/>
+  <!-- ????? -->
+  <path d="M 56 66 Q 64 72 72 66" stroke="#c48a7a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- ????? -->
+  <ellipse cx="46" cy="62" rx="6" ry="4" fill="#e8a098" opacity="0.4"/>
+  <ellipse cx="82" cy="62" rx="6" ry="4" fill="#e8a098" opacity="0.4"/>
+  <!-- ????????????????? -->
+  <path d="M 52 24 L 58 18 L 64 24 L 70 18 L 76 24 L 72 30 L 64 26 L 56 30 Z" fill="rgba(204,255,0,0.7)" stroke="rgba(204,255,0,0.9)" stroke-width="1"/>
+  <!-- ????????????? -->
+  <text x="64" y="98" text-anchor="middle" font-size="20" fill="rgba(204,255,0,0.55)" font-family="serif">&#9824;</text>
+</svg>

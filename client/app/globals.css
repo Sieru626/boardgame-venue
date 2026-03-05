@@ -330,6 +330,31 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   TAB & HOVER EFFECTS (V0 style)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.tab-cyber {
+  position: relative;
+  transition: all 0.2s ease;
+}
+.tab-cyber:hover {
+  background: rgba(204, 255, 0, 0.05);
+}
+.tab-cyber.active {
+  background: rgba(204, 255, 0, 0.1);
+}
+.tab-cyber.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--neon-lime);
+  box-shadow: 0 0 10px rgba(204, 255, 0, 0.5);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    FELT TABLE
    ═══════════════════════════════════════════════════════════════════ */
 
