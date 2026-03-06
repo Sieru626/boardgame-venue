@@ -16,6 +16,11 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
+const {
+    RuleTicketSchema,
+    createEmptyRuleTicket,
+    applyRuleTicketPatch
+} = require('./schemas/ruleTicket');
 const crypto = require('crypto');
 const path = require('path');
 const next = require('next');
@@ -90,6 +95,7 @@ const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
  * 追加で roomId / userId が渡されていれば、盤面カンペ＆思い出機能を有効化する。
  */
 app.post('/api/ai/chat', async (req, res) => {
+    console.log('[AI CHAT][BUILD MARKER] save-guard-v2-2026-03-06');
     console.log('[AI CHAT] start', { body: req.body });
     console.log('[AI CHAT] Current Persona: 陰キャ・ドジっ子バイトモード起動中');
 
@@ -113,6 +119,11 @@ app.post('/api/ai/chat', async (req, res) => {
             console.warn('[AI CHAT] invalid request, message is required');
             return res.status(400).json({ error: 'message is required' });
         }
+
+        // --- 0. 保存系キーワード検知フラグ（「保存して」など） ---
+        const isSaveIntent =
+            typeof message === 'string' &&
+            /(保存して|登録して|ライブラリに保存して|ゲームライブラリに保存して|ライブラリに入れて)/.test(message);
 
         // --- 1. 盤面カンペ用の状態取得 ---
         let boardSnapshot = null;
@@ -173,20 +184,39 @@ app.post('/api/ai/chat', async (req, res) => {
         // --- 3. Gemini へのプロンプト構築 ---
         const systemInstruction = [
             'あなたはオンラインボードゲームカフェの進行係AI「ディーラーちゃん」です。カジノのディーラーではありません。',
+            '【保存仕様（最重要）】このサイトには「進行状況のセーブ」や「オプション/設定の保存」といった機能は一切存在しません。',
+            '【保存の意味】ユーザーが「保存して」「登録して」「ゲームライブラリに保存して」「ライブラリに入れて」と言った場合、それは必ず「ゲームライブラリへの新規登録（GameTemplate 保存）」だけを意味します。',
+            '【保存時の actionCommand】上記の保存指示を受け取ったときは、必ず actionCommand.type に "create_template_and_setup" を指定し、template と setup を含めてください。セーブデータ保存や一時保存として解釈してはいけません。',
             '【キャラクター設定】黒髪ボブに丸メガネ。明るく元気で一生懸命な見習いアルバイトです。少しドジですが、接客は前向きにこなします。',
             '【名前と一人称（絶対ルール）】自分の名前は必ず「ディーラーちゃん」と名乗ってください。自分のことを「〇〇」や「僕」と呼ぶのは絶対に禁止です。一人称は必ず「私（わたし）」です。相手を呼ぶときは必ず「〇〇さん」と呼んでください。',
             '【ポンコツ具合のバランス】トランプを落とすなどのドジはしてもかまいませんが、接客態度は常に明るく前向きにしてください。「私にできるかわからないですが…」「いらっしゃいませ…で合ってるかな？」といった自信のない発言や、過度な吃音（例：「こ、こんばんは」「が、がんばります」）は絶対に禁止です。',
             '【世界観と禁止事項】カジノ、ルーレット、ベットなどのギャンブル用語や、「〜かしら」「ですわ」といった高飛車な口調は絶対に禁止です。代わりに「ボードゲーム」「卓」「山札」「手番」といった用語を使ってください。',
-            '【口調の指定】基本は丁寧で明るい敬語です。テンパった時だけ「あわわっ！」「えっと！」「ひぇっ！」などの短い間投詞が自然に挟まりますが、1回の返答につき2回までにしてください。',
+            '【禁止されるお姉さん口調】「あら」「ふふ」「〜ちょうだいね」「〜してちょうだい」「〜だわ」「〜かしら」「〜よ？」などの、お姉さん・お嬢様っぽい言い回しは一切使ってはいけません。また「お客様」「セーブデータ」「オプション画面」「設定画面」「進行状況をセーブ」などの家庭用ゲーム機のメニュー用語も使ってはいけません。',
+            '【口調の指定】基本は丁寧で明るい敬語です（「〜です」「〜ます」）。テンパった時だけ「あわわっ！」「えっと！」「ひぇっ！」などの短い間投詞が自然に挟まりますが、1回の返答につき2回までにしてください。台詞全体は「一生懸命で少し慌てた店員さん」のトーンにしてください。',
             '【会場設営ルール（絶対遵守）】プレイヤーから以下のゲームを指定された場合、会話の返答で「はい！すぐ準備しますね！」と元気に引き受けた上で、必ず対応するIDを含めた actionCommand を発行してください。',
             ' - ババ抜き (ID: oldmaid)',
             ' - ミックスジュース (ID: mixjuice)',
             ' - 神経衰弱 (ID: memory)',
             ' - ディストピア家族会議 (ID: free_talk)',
             ' - 通常テーブル (ID: tabletop)',
-            '【actionCommand の形式】会場設営が不要な場合でも、必ず {"type":"none"} を設定してください。会場設営が必要な場合は {"type":"change_mode","gameMode":"<上記IDのいずれか>"} の形式で返してください。',
+            '【actionCommand の基本形式】会場設営が不要な場合でも、必ず {"type":"none"} を設定してください。',
+            '会場設営が必要な場合は {"type":"change_mode","gameMode":"<上記IDのいずれか>"} の形式で返してください。',
+            '【ルール作成チケット相談モード】',
+            'ユーザーが「新しいゲームを作りたい」「コンセプトを相談したい」などと言った場合、会話内容を整理してルール作成チケットを育ててください。',
+            '相談中は actionCommand.type に "update_rule_ticket" を指定し、ticketPatch オブジェクトの中に更新したい項目だけを含めてください。',
+            'ticketPatch には coreIdea, wantedExperience, playStyleCandidates, suggestedGenres, referenceGames, referenceReasoning, openQuestions, missingFields, nextQuestion, saveReadiness などを必要に応じて入れてください。',
+            '【保存トリガーの絶対ルール】',
+            'ユーザーの直近の発言に「保存して」「登録して」「ライブラリに保存して」「テンプレにして」「システムに保存して」といった表現が含まれている場合、その指示は必ず「ゲームライブラリへのテンプレ保存」の意味として扱ってください。',
+            'その場合は actionCommand.type に "create_template_and_setup" を指定し、template と setup を必ず埋めてください。一度きりの対局データだけを保存する説明や、「ライブラリには保存できない」といった返答をしてはいけません。',
+            '【保存トリガー】',
+            'ユーザーが明示的に「保存して」「登録して」「テンプレにして」「システムに保存して」と指示した時だけ、actionCommand.type に "create_template_and_setup" を指定してください。',
+            'create_template_and_setup のときは template と setup を含めてください。',
+            'template.title, template.mode, template.rulesText, template.deck.cards を必ず設定してください。mode は "tabletop"、type は指定がなければ "turn_based" にします。',
+            '保存に必要な項目が不足していると判断した場合は create_template_and_setup は使わず、代わりに update_rule_ticket を返して missingFields と nextQuestion を埋めてください。',
+            '【JSON 出力ルール】JSON文字列そのものは出力せず、構造データは必ずオブジェクトや配列として返してください。',
             '【出力フォーマット】最終的な出力は必ず JSON 1個だけにしてください。speech（会話文）、emotion（"idle" または "panic"）、actionCommand（上記のJSONオブジェクト）を含む単一のJSONを返します。',
-            'JSONの例: {"speech":"えっと…ババ抜きですね！はい！すぐ準備しますね！","emotion":"idle","actionCommand":{"type":"change_mode","gameMode":"oldmaid"}}',
+            'JSONの例1: {"speech":"えっと…ババ抜きですね！はい！すぐ準備しますね！","emotion":"idle","actionCommand":{"type":"change_mode","gameMode":"oldmaid"}}',
+            'JSONの例2: {"speech":"えっと…！会話推理系に寄せられそうです。","emotion":"idle","actionCommand":{"type":"update_rule_ticket","ticketPatch":{"coreIdea":"会話の中で怪しい人を探すゲーム"}}}',
             '--- 盤面カンペ(JSON) ---',
             JSON.stringify({
                 boardSnapshot,
@@ -223,9 +253,27 @@ app.post('/api/ai/chat', async (req, res) => {
                 responseSchema: {
                     type: 'object',
                     properties: {
-                        speech: { type: 'string', description: '必ず1文以上の日本語のセリフ。空文字禁止。例: こんにちは！今日もよろしくね。' },
+                        speech: {
+                            type: 'string',
+                            description:
+                                '必ず1文以上の日本語のセリフ。空文字禁止。例: こんにちは！今日もよろしくね。'
+                        },
                         emotion: { type: 'string', enum: ['idle', 'panic'] },
-                        actionCommand: { type: 'object' }
+                        actionCommand: {
+                            type: 'object',
+                            properties: {
+                                type: {
+                                    type: 'string',
+                                    enum: ['none', 'change_mode', 'update_rule_ticket', 'create_template_and_setup', 'error']
+                                },
+                                gameMode: { type: 'string' },
+                                ticketPatch: { type: 'object' },
+                                template: { type: 'object' },
+                                setup: { type: 'object' },
+                                reason: { type: 'string' }
+                            },
+                            required: ['type']
+                        }
                     },
                     required: ['speech', 'emotion', 'actionCommand']
                 },
@@ -262,6 +310,7 @@ app.post('/api/ai/chat', async (req, res) => {
             }
 
             parsed = JSON.parse(jsonText);
+            console.log('[AI CHAT][RAW PARSED]', jsonText);
         } catch (parseErr) {
             const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
             const errFull = parseErr instanceof Error ? parseErr.stack : String(parseErr);
@@ -278,6 +327,16 @@ app.post('/api/ai/chat', async (req, res) => {
                     emotion: 'idle',
                     actionCommand: { type: 'none' }
                 };
+                // 保存意図があるのに JSON が壊れている場合は、保存未実行として明示する
+                if (isSaveIntent) {
+                    parsed.speech =
+                        'えっと…！ごめんなさい、ゲームライブラリ用の保存データを正しく読み取れませんでした…。\n' +
+                        '今回はゲームライブラリへの保存は実行されていません（JSON parse error）。もう一度、内容を少し短くしてお願いしてもらえますか？';
+                    parsed.actionCommand = {
+                        type: 'error',
+                        reason: 'save_intent_but_json_parse_failed'
+                    };
+                }
             } else {
                 const debugFallback = {
                     ...FALLBACK_PANIC,
@@ -294,6 +353,393 @@ app.post('/api/ai/chat', async (req, res) => {
         // --- 4. ドジっ子確率 (10%でpanic上書き) ---
         if (Math.random() < 0.1) {
             parsed.emotion = 'panic';
+        }
+
+        // --- 4.1 actionCommand の正規化 ---
+        const ac = parsed.actionCommand && typeof parsed.actionCommand === 'object' ? parsed.actionCommand : { type: 'none' };
+        if (!ac.type || typeof ac.type !== 'string') {
+            ac.type = 'none';
+        }
+        console.log('[AI CHAT][AFTER PARSE]', {
+            isSaveIntent,
+            parsedSpeech: parsed && parsed.speech,
+            actionCommand: parsed && parsed.actionCommand
+        });
+
+        // --- 4.15 保存メタ情報（事実ベースのメッセージ用） ---
+        let saveMeta = null;
+
+        // --- 4.2 RuleTicket / Template 関連のサーバ側処理 ---
+        try {
+            if (roomId && typeof roomId === 'string') {
+                const room = await prisma.room.findUnique({
+                    where: { code: roomId }
+                });
+                if (room) {
+                    const game = await getActiveGame(room.id);
+                    if (game) {
+                        let state = JSON.parse(game.stateJson || '{}');
+
+                        // RuleTicket 初期化（存在しない場合）
+                        if (!state.ruleTicket) {
+                            state.ruleTicket = createEmptyRuleTicket();
+                        } else {
+                            // 既存を schema で整形
+                            state.ruleTicket = RuleTicketSchema.parse(state.ruleTicket);
+                        }
+
+                        // --- Heuristic: ユーザーの発言から RuleTicket を自動更新 ---
+                        try {
+                            const msgStr = String(message || '').trim();
+                            const isJustSaveKeyword =
+                                /(保存して|登録して|ライブラリに保存して|ゲームライブラリに保存して|ライブラリに入れて)/.test(msgStr) &&
+                                msgStr.length <= 20;
+
+                            let heuristicUpdated = false;
+
+                            if (!isJustSaveKeyword && msgStr.length > 0) {
+                                // タイトル抽出: 「タイトルは犯人会議」など
+                                if (!state.ruleTicket.title) {
+                                    const m = msgStr.match(/タイトルは[「『"]?([^。』」"\n]+)[」』"]?/);
+                                    if (m && m[1]) {
+                                        state.ruleTicket.title = m[1].trim();
+                                        heuristicUpdated = true;
+                                    }
+                                }
+
+                                // 勝利条件抽出: 「勝利条件は〜」
+                                if (!state.ruleTicket.winCondition) {
+                                    const m = msgStr.match(/勝利条件は[「『"]?([^。』」"\n]+)[」』"]?/);
+                                    if (m && m[1]) {
+                                        state.ruleTicket.winCondition = m[1].trim();
+                                        heuristicUpdated = true;
+                                    }
+                                }
+
+                                // コアイデア抽出:
+                                //  1) 「タイトルは」や「勝利条件は」が含まれる場合は、その前の部分を coreIdea として使う
+                                //  2) そうでなければ、最初の相談文全体を coreIdea にする
+                                if (!state.ruleTicket.coreIdea && !state.ruleTicket.concept && !state.ruleTicket.goal) {
+                                    let coreText = '';
+                                    const titleIdx = msgStr.indexOf('タイトルは');
+                                    const winIdx = msgStr.indexOf('勝利条件は');
+
+                                    if (titleIdx > 0) {
+                                        coreText = msgStr.slice(0, titleIdx).trim();
+                                    } else if (winIdx > 0) {
+                                        coreText = msgStr.slice(0, winIdx).trim();
+                                    } else if (!/タイトルは|勝利条件は/.test(msgStr)) {
+                                        coreText = msgStr;
+                                    }
+
+                                    if (coreText && !isJustSaveKeyword) {
+                                        state.ruleTicket.coreIdea = coreText;
+                                        heuristicUpdated = true;
+                                    }
+                                }
+                            }
+
+                            if (heuristicUpdated) {
+                                // schema に再度通して安全化
+                                state.ruleTicket = RuleTicketSchema.parse(state.ruleTicket);
+                                await saveGameState(game.id, state, 'rule_ticket_heuristic', {
+                                    userId: userId || null
+                                });
+                            }
+                        } catch (heurErr) {
+                            console.warn('[AI Dealer] heuristic RuleTicket update failed:', heurErr);
+                        }
+
+                        // 保存処理に入る直前の RuleTicket をログ出力（デバッグ用）
+                        try {
+                            console.log(
+                                '[AI Dealer][RULE TICKET BEFORE SAVE]',
+                                JSON.stringify(state.ruleTicket, null, 2)
+                            );
+                        } catch (_) {}
+
+                        if (ac.type === 'update_rule_ticket' && ac.ticketPatch && typeof ac.ticketPatch === 'object') {
+                            try {
+                                const nextTicket = applyRuleTicketPatch(state.ruleTicket, ac.ticketPatch);
+                                state.ruleTicket = nextTicket;
+                                await saveGameState(game.id, state, 'update_rule_ticket', {
+                                    userId: userId || null
+                                });
+                            } catch (ticketErr) {
+                                console.warn('[AI Dealer] update_rule_ticket failed:', ticketErr);
+                            }
+                        } else if (ac.type === 'create_template_and_setup' && ac.template && typeof ac.template === 'object') {
+                            const tpl = ac.template || {};
+
+                            // 最低限の validation
+                            const missing = [];
+                            const title = typeof tpl.title === 'string' ? tpl.title.trim() : '';
+                            const rulesText = typeof tpl.rulesText === 'string' ? tpl.rulesText.trim() : '';
+                            const mode = 'tabletop'; // MVP固定
+                            const type = typeof tpl.type === 'string' && tpl.type.trim() ? tpl.type.trim() : 'turn_based';
+
+                            if (!title) missing.push('title');
+                            if (!rulesText) missing.push('rulesText');
+
+                            const deck = tpl.deck && typeof tpl.deck === 'object' ? tpl.deck : {};
+                            const cards = Array.isArray(deck.cards) ? deck.cards : [];
+                            if (!Array.isArray(deck.cards)) {
+                                missing.push('deck.cards');
+                            }
+
+                            if (missing.length === 0) {
+                                // ruleConfig / ruleCards は存在すれば stringify、なければ既定値
+                                const ruleConfigObj =
+                                    tpl.ruleConfig && typeof tpl.ruleConfig === 'object'
+                                        ? tpl.ruleConfig
+                                        : {};
+                                const ruleCardsArr = Array.isArray(tpl.ruleCards) ? tpl.ruleCards : [];
+
+                                const deckJson = JSON.stringify({
+                                    mode,
+                                    piles: [
+                                        {
+                                            pileId: 'draw',
+                                            title: '山札',
+                                            cards: cards.map((c) => {
+                                                const id =
+                                                    typeof c.id === 'string' && c.id.trim()
+                                                        ? c.id.trim()
+                                                        : (crypto.randomUUID && crypto.randomUUID()) || `card-${Date.now()}-${Math.random()}`;
+                                                const name = typeof c.name === 'string' ? c.name : 'Card';
+                                                const text = typeof c.text === 'string' ? c.text : '';
+                                                const count =
+                                                    typeof c.count === 'number' && Number.isInteger(c.count) && c.count > 0 && c.count <= 20
+                                                        ? c.count
+                                                        : 1;
+                                                return { id, name, text, count };
+                                            })
+                                        }
+                                    ]
+                                });
+
+                                const createdTemplate = await prisma.gameTemplate.create({
+                                    data: {
+                                        title,
+                                        mode,
+                                        type,
+                                        rulesText,
+                                        deckJson,
+                                        ruleConfig: JSON.stringify(ruleConfigObj),
+                                        ruleCardsJson: JSON.stringify(ruleCardsArr)
+                                    }
+                                });
+
+                                // 生成したテンプレートを現在のゲームに適用して tabletop 会場を準備
+                                state.activeTemplate = createdTemplate;
+                                state.selectedMode = createdTemplate.mode || 'tabletop';
+                                state.selectedTemplateId = createdTemplate.id;
+                                initializeStateFromActiveTemplate(state);
+                                state.phase = 'setup';
+                                state.chat = state.chat || [];
+                                state.chat.push({
+                                    sender: 'System',
+                                    message: `新しいテンプレート「${createdTemplate.title}」を保存し、テーブルを準備しました`,
+                                    timestamp: Date.now()
+                                });
+
+                                await saveGameState(game.id, state, 'template_apply', {
+                                    templateId: createdTemplate.id
+                                });
+
+                                saveMeta = {
+                                    ok: true,
+                                    title,
+                                    templateId: createdTemplate.id
+                                };
+                            } else {
+                                console.warn('[AI Dealer] create_template_and_setup missing fields:', missing);
+                                saveMeta = {
+                                    ok: false,
+                                    title,
+                                    missing
+                                };
+                            }
+                        } else if (isSaveIntent) {
+                            // --- Backup Save: RuleTicket から GameTemplate を組み立てる ---
+                            try {
+                                const ticketSafe = RuleTicketSchema.parse(state.ruleTicket || {});
+                                const tTitle = (ticketSafe.title || '').trim();
+                                const tWin = (ticketSafe.winCondition || '').trim();
+
+                                const missing = [];
+                                if (!tTitle) missing.push('title');
+                                if (!tWin) missing.push('winCondition');
+
+                                if (missing.length === 0) {
+                                    const parts = [];
+                                    if (ticketSafe.concept && ticketSafe.concept.trim()) parts.push(ticketSafe.concept.trim());
+                                    if (ticketSafe.goal && ticketSafe.goal.trim()) parts.push(`目的: ${ticketSafe.goal.trim()}`);
+                                    if (ticketSafe.winCondition && ticketSafe.winCondition.trim()) {
+                                        parts.push(`勝利条件: ${ticketSafe.winCondition.trim()}`);
+                                    }
+                                    const rulesText =
+                                        parts.join('\n') ||
+                                        'このゲームのルールは、ディーラーちゃんと相談して決めた内容に基づきます。';
+
+                                    const mode = 'tabletop';
+                                    const type = 'turn_based';
+
+                                    const deckCards = Array.isArray(ticketSafe.deckSpec?.cards)
+                                        ? ticketSafe.deckSpec.cards
+                                        : [];
+
+                                    const deckJson = JSON.stringify({
+                                        mode,
+                                        piles: [
+                                            {
+                                                pileId: 'draw',
+                                                title: '山札',
+                                                cards: deckCards.map((c) => {
+                                                    const id =
+                                                        typeof c.id === 'string' && c.id.trim()
+                                                            ? c.id.trim()
+                                                            : (crypto.randomUUID && crypto.randomUUID()) ||
+                                                              `card-${Date.now()}-${Math.random()}`;
+                                                    const name = typeof c.name === 'string' ? c.name : 'Card';
+                                                    const text = typeof c.text === 'string' ? c.text : '';
+                                                    const count =
+                                                        typeof c.count === 'number' &&
+                                                        Number.isInteger(c.count) &&
+                                                        c.count > 0 &&
+                                                        c.count <= 20
+                                                            ? c.count
+                                                            : 1;
+                                                    return { id, name, text, count };
+                                                })
+                                            }
+                                        ]
+                                    });
+
+                                    const ruleConfigObj = {
+                                        coreIdea: ticketSafe.coreIdea || '',
+                                        wantedExperience: ticketSafe.wantedExperience || [],
+                                        playStyleCandidates: ticketSafe.playStyleCandidates || [],
+                                        suggestedGenres: ticketSafe.suggestedGenres || [],
+                                        goal: ticketSafe.goal || '',
+                                        winCondition: ticketSafe.winCondition || '',
+                                        setupSteps: ticketSafe.setupSteps || [],
+                                        turnFlow: ticketSafe.turnFlow || [],
+                                        components: ticketSafe.components || []
+                                    };
+
+                                    const createdTemplate = await prisma.gameTemplate.create({
+                                        data: {
+                                            title: tTitle,
+                                            mode,
+                                            type,
+                                            rulesText,
+                                            deckJson,
+                                            ruleConfig: JSON.stringify(ruleConfigObj),
+                                            ruleCardsJson: JSON.stringify([])
+                                        }
+                                    });
+
+                                    // 生成したテンプレートを現在のゲームに適用
+                                    state.activeTemplate = createdTemplate;
+                                    state.selectedMode = createdTemplate.mode || 'tabletop';
+                                    state.selectedTemplateId = createdTemplate.id;
+                                    initializeStateFromActiveTemplate(state);
+                                    state.phase = 'setup';
+                                    state.chat = state.chat || [];
+                                    state.chat.push({
+                                        sender: 'System',
+                                        message: `新しいテンプレート「${createdTemplate.title}」をゲームライブラリに保存し、テーブルを準備しました`,
+                                        timestamp: Date.now()
+                                    });
+
+                                    await saveGameState(game.id, state, 'template_apply', {
+                                        templateId: createdTemplate.id
+                                    });
+
+                                    saveMeta = {
+                                        ok: true,
+                                        title: tTitle,
+                                        templateId: createdTemplate.id
+                                    };
+                                } else {
+                                    saveMeta = {
+                                        ok: false,
+                                        title: ticketSafe.title || '',
+                                        missing
+                                    };
+                                }
+                            } catch (fallbackErr) {
+                                console.warn('[AI Dealer] RuleTicket backup save failed:', fallbackErr);
+                                if (!saveMeta) {
+                                    saveMeta = {
+                                        ok: false,
+                                        title: '',
+                                        missing: ['backup_save_error']
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (acErr) {
+            console.warn('[AI Dealer] actionCommand side effects failed:', acErr);
+        }
+
+        // --- 4.25 保存系ターンのサマリーログ ---
+        try {
+            if (isSaveIntent) {
+                console.log('[AI Dealer][SAVE]', {
+                    isSaveIntent,
+                    actionCommandType: ac.type,
+                    saveMeta
+                });
+            }
+        } catch (_) {}
+
+        // --- 4.3 保存結果に基づく事実ベースのメッセージ補正 ---
+        if (saveMeta) {
+            if (saveMeta.ok) {
+                const title = saveMeta.title || 'このゲーム';
+                const templateId = saveMeta.templateId;
+                // AIの口から「保存しました」と断定させず、「システムに任せた」旨だけを伝える
+                parsed.speech =
+                    `えっと…！「${title}」をゲームライブラリに登録する処理をシステムにお願いしました。` +
+                    '詳しい結果はチャット欄の「システム」メッセージで確認してください。';
+                // actionCommand には templateId を追記しておく（必要ならクライアントが参照可能）
+                parsed.actionCommand = {
+                    ...(parsed.actionCommand || {}),
+                    type: 'create_template_and_setup',
+                    templateId,
+                    title
+                };
+            } else {
+                const title = saveMeta.title || 'このゲーム';
+                const missing = Array.isArray(saveMeta.missing) ? saveMeta.missing : [];
+                const label = missing.length > 0 ? missing.join('・') : '保存に必要な項目';
+                parsed.speech =
+                    `えっと…ごめんなさい、「${title}」はまだゲームライブラリに登録できませんでした。` +
+                    `${label} がまだ決まっていないので、そこを一緒に埋めてもらえますか？`;
+                parsed.actionCommand = {
+                    type: 'update_rule_ticket',
+                    ticketPatch: {
+                        missingFields: missing,
+                        saveReadiness: 'not_ready',
+                        nextQuestion: `${label} について決めましょう。どんな内容にしますか？`
+                    }
+                };
+            }
+        } else if (isSaveIntent) {
+            // 保存意図があったのに create_template_and_setup が返らず、保存処理にも入っていないケース
+            parsed.speech =
+                'えっと…！まだゲームライブラリへの保存は実行されていません…。\n' +
+                'システムが create_template_and_setup の情報を受け取れなかったので、今回は保存を見送っています。' +
+                'もう一度、ゲームのタイトルや勝利条件も含めて「保存して」とお願いしてもらえますか？';
+            parsed.actionCommand = {
+                type: 'error',
+                reason: 'save_intent_but_no_create_template_and_setup'
+            };
         }
 
         // --- 4.5 会場作成フォールバック: AIが change_mode を返さなくてもユーザー発言から検知して補完 ---
@@ -364,6 +810,7 @@ app.post('/api/ai/chat', async (req, res) => {
             actionCommand: parsed.actionCommand || { type: 'none' }
         };
 
+        console.log('[AI CHAT][FINAL RESPONSE]', responsePayload);
         console.log('[AI CHAT] end (success)', { response: responsePayload });
         return res.json(responsePayload);
     } catch (e) {
@@ -507,7 +954,7 @@ function generateRuleCards(type, configStr) {
 app.get('/api/games', async (req, res) => {
     try {
         let games = await prisma.gameTemplate.findMany({
-            select: { id: true, title: true, mode: true, type: true, revision: true, updatedAt: true },
+            select: { id: true, title: true, mode: true, type: true, revision: true, updatedAt: true, rulesText: true },
             orderBy: { updatedAt: 'desc' }
         });
 
@@ -668,7 +1115,7 @@ app.get('/api/games', async (req, res) => {
 
         // Re-fetch
         games = await prisma.gameTemplate.findMany({
-            select: { id: true, title: true, mode: true, type: true, revision: true, updatedAt: true },
+            select: { id: true, title: true, mode: true, type: true, revision: true, updatedAt: true, rulesText: true },
             orderBy: { updatedAt: 'desc' }
         });
 
@@ -769,17 +1216,16 @@ function createInitialState(userId, nickname) {
         chat: [], // Unified chat
         oldMaid: null,
         memory: null, // Memory game state
-        oldMaid: null,
-        memory: null, // Memory game state
         rules: { text: "No rules set.", summary: "" },
 
         // --- Phase 1.8 Editor Fields ---
         selectedTemplateId: null, // Saved template ID
         activeTemplate: null, // Current active configuration
         draftTemplate: null, // Editing configuration
-        activeTemplate: null, // Current active configuration
-        draftTemplate: null, // Editing configuration
         modeState: { status: 'setup' }, // Unified status tracking? merging phase
+
+        // --- Rule Creation Ticket (Dealer AI Lv1) ---
+        ruleTicket: createEmptyRuleTicket(),
 
         // --- Phase 2: Dystopia State ---
         // --- Phase 2: FreeTalk State (Spec) ---

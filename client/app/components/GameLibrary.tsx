@@ -16,6 +16,7 @@ type GameTemplate = {
     id: string;
     title: string;
     mode: string;
+    type?: string;
     revision: number;
     updatedAt: string | number | Date; // API/Prisma で string または Date が渡る場合あり
     rulesText?: string;
@@ -155,75 +156,114 @@ export default function GameLibrary({ roomId, gameId, isHost, onClose, socket, c
                         </div>
 
                         {loading ? <p>読み込み中...</p> : (
-                            <div className="space-y-2">
-                                {games.map(t => (
-                                    <div key={t.id} className="bg-gray-700 p-3 rounded">
-                                        <div>
-                                            <div className="font-bold text-lg">{String(t?.title ?? '')}</div>
-                                            <div className="text-xs text-gray-400">
-                                                モード: {String(t?.mode ?? '')} | Rev: {String(t?.revision ?? '')} | {formatDateTime(t?.updatedAt)}
+                            <div className="space-y-4">
+                                {(() => {
+                                    const standardTitles = new Set([
+                                        'ミックスジュース',
+                                        'ババ抜き',
+                                        '神経衰弱',
+                                        'ディストピア家族会議 (テスト版v1)'
+                                    ]);
+                                    const standardGames = games.filter(g => standardTitles.has(String(g.title)));
+                                    const createdGames = games.filter(g => !standardTitles.has(String(g.title)));
+
+                                    const renderSection = (title: string, list: GameTemplate[]) => {
+                                        if (list.length === 0) return null;
+                                        return (
+                                            <div key={title}>
+                                                <h3 className="text-sm font-bold text-gray-300 mb-2">{title}</h3>
+                                                <div className="space-y-2">
+                                                    {list.map(t => {
+                                                        const shortRules =
+                                                            typeof t.rulesText === 'string'
+                                                                ? t.rulesText.split('\n')[0].slice(0, 80)
+                                                                : '';
+                                                        return (
+                                                            <div key={t.id} className="bg-gray-700 p-3 rounded">
+                                                                <div>
+                                                                    <div className="font-bold text-lg">{String(t?.title ?? '')}</div>
+                                                                    <div className="text-xs text-gray-400">
+                                                                        モード: {String(t?.mode ?? '')} | Rev: {String(t?.revision ?? '')} | {formatDateTime(t?.updatedAt)}
+                                                                    </div>
+                                                                    {shortRules && (
+                                                                        <div className="text-xs text-gray-300 mt-1 line-clamp-2">
+                                                                            {shortRules}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex gap-2 mt-4 justify-end">
+                                                                    {isHost && (
+                                                                        <>
+                                                                            {/* Duplicate & Edit (Future) - Simplified here */}
+                                                                            <button
+                                                                                disabled={true}
+                                                                                className="bg-gray-700 text-gray-500 px-3 py-1 rounded text-xs opacity-50 cursor-not-allowed"
+                                                                            >
+                                                                                複製して編集 (未実装)
+                                                                            </button>
+
+                                                                            {/* Delete Button */}
+                                                                            <button
+                                                                                onClick={async () => {
+                                                                                    if (!confirm(`「${t.title}」を削除しますか？この操作は取り消せません。`)) return;
+                                                                                    try {
+                                                                                        const res = await fetch(`/api/games/${t.id}`, { method: 'DELETE' });
+                                                                                        if (res.ok) {
+                                                                                            alert('削除しました');
+                                                                                            fetchGames();
+                                                                                        } else {
+                                                                                            const d = await res.json();
+                                                                                            alert('削除失敗: ' + d.error);
+                                                                                        }
+                                                                                    } catch (e: any) {
+                                                                                        alert('削除エラー: ' + e.message);
+                                                                                    }
+                                                                                }}
+                                                                                className="bg-red-900/50 hover:bg-red-700 text-red-200 px-3 py-1 rounded text-xs"
+                                                                            >
+                                                                                🗑 削除
+                                                                            </button>
+
+                                                                            {/* Apply / Start */}
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    if (!confirm(`「${t.title}」を適用しますか？`)) return;
+
+                                                                                    setIsLoading(true);
+                                                                                    socket.emit('apply_game_template', { roomId, templateId: t.id }, (res: any) => {
+                                                                                        setIsLoading(false);
+                                                                                        if (res.ok) {
+                                                                                            onClose();
+                                                                                            alert(`「${t.title}」を適用しました。準備画面から開始してください。`);
+                                                                                        } else {
+                                                                                            alert('Error: ' + res.error);
+                                                                                        }
+                                                                                    });
+                                                                                }}
+                                                                                className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded shadow-lg transition"
+                                                                                disabled={isLoading}
+                                                                            >
+                                                                                適用する
+                                                                            </button>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="flex gap-2 mt-4 justify-end">
-                                            {isHost && (
-                                                <>
-                                                    {/* Duplicate & Edit (Future) - Simplified here */}
-                                                    <button
-                                                        disabled={true} // Stub for now
-                                                        className="bg-gray-700 text-gray-500 px-3 py-1 rounded text-xs opacity-50 cursor-not-allowed"
-                                                    >
-                                                        複製して編集 (未実装)
-                                                    </button>
+                                        );
+                                    };
 
-                                                    {/* Delete Button */}
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (!confirm(`「${t.title}」を削除しますか？この操作は取り消せません。`)) return;
-                                                            try {
-                                                                const res = await fetch(`/api/games/${t.id}`, { method: 'DELETE' });
-                                                                if (res.ok) {
-                                                                    alert('削除しました');
-                                                                    fetchGames();
-                                                                } else {
-                                                                    const d = await res.json();
-                                                                    alert('削除失敗: ' + d.error);
-                                                                }
-                                                            } catch (e: any) {
-                                                                alert('削除エラー: ' + e.message);
-                                                            }
-                                                        }}
-                                                        className="bg-red-900/50 hover:bg-red-700 text-red-200 px-3 py-1 rounded text-xs"
-                                                    >
-                                                        🗑 削除
-                                                    </button>
-
-                                                    {/* Apply / Start */}
-                                                    <button
-                                                        onClick={() => {
-                                                            if (!confirm(`「${t.title}」を適用しますか？`)) return;
-
-                                                            setIsLoading(true);
-                                                            socket.emit('apply_game_template', { roomId, templateId: t.id }, (res: any) => {
-                                                                setIsLoading(false);
-                                                                if (res.ok) {
-                                                                    onClose();
-                                                                    alert(`「${t.title}」を適用しました。準備画面から開始してください。`);
-                                                                } else {
-                                                                    alert('Error: ' + res.error);
-                                                                }
-                                                            });
-                                                        }}
-                                                        className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded shadow-lg transition"
-                                                        disabled={isLoading}
-                                                    >
-                                                        適用する
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                                {games.length === 0 && <p className="text-gray-400">保存されたゲームはありません。</p>}
+                                    return (
+                                        <>
+                                            {renderSection('標準ゲーム', standardGames)}
+                                            {renderSection('作成したゲーム', createdGames)}
+                                            {games.length === 0 && <p className="text-gray-400">保存されたゲームはありません。</p>}
+                                        </>
+                                    );
+                                })()}
                             </div>
                         )}
                     </>
