@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+console.log('[BUILD MARKER] dealer-save-v1-prod-check');
+
 console.log('--- BoardGame Venue v8.0 (CPU1/2/3 naming) ---');
 console.log('--- SERVER STARTUP ENV CHECK ---');
 console.log('NODE_ENV:', process.env.NODE_ENV);
